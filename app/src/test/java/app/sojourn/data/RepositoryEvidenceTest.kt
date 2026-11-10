@@ -8,6 +8,8 @@ import app.sojourn.data.db.Document
 import app.sojourn.data.db.DocumentKind
 import app.sojourn.data.db.Flight
 import app.sojourn.data.db.SojournDatabase
+import app.sojourn.data.travel.FoundTrip
+import app.sojourn.data.travel.TripKind
 import java.time.LocalDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -71,5 +73,18 @@ class RepositoryEvidenceTest {
         val kept = repository.flights.first().single()
         assertEquals("NGJY6Y", kept.reference)
         assertEquals("Window seat", kept.note)
+    }
+
+    @Test
+    fun aBoardingPassFillsInOnlyWhatTheFlightLacked() = runBlocking {
+        repository.saveFlight(flight.copy(seat = "2A"))
+        val saved = db.flights().all().single()
+        val pass = FoundTrip(TripKind.FLIGHT, day, number = "W6 4666", from = "BCN", to = "LCA", departureMinute = 19 * 60 + 55, passenger = "DOE/JANE", reference = "NGJY6Y", seat = "13B")
+        repository.enrichFlight(saved, pass)
+        val kept = db.flights().all().single()
+        assertEquals("NGJY6Y", kept.reference)
+        assertEquals("DOE/JANE", kept.passenger)
+        assertEquals("2A", kept.seat)
+        assertEquals(19 * 60 + 55, kept.departureMinute)
     }
 }

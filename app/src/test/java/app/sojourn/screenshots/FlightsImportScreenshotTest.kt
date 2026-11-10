@@ -16,7 +16,13 @@ import app.sojourn.data.travel.UnreadEvent
 import app.sojourn.domain.Reports
 import app.sojourn.ui.flights.FlightCard
 import app.sojourn.ui.flights.FlightEditorContent
+import app.sojourn.ui.flights.FlightEvidenceList
 import app.sojourn.ui.flights.FlightForm
+import app.sojourn.ui.flights.PasteResult
+import app.sojourn.ui.evidence.bundle
+import app.sojourn.data.db.Document
+import app.sojourn.data.db.DocumentKind
+import androidx.compose.runtime.remember
 import app.sojourn.ui.imports.ImportDone
 import app.sojourn.ui.imports.ImportPhase
 import app.sojourn.ui.imports.TripsPreview
@@ -33,20 +39,28 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = TALL_PHONE, application = Application::class)
-class PlanFlightsImportScreenshotTest {
+class FlightsImportScreenshotTest {
     @get:Rule
     val compose = createComposeRule()
 
     private val booked = Sample.flights[1].copy(reference = "QX7Z2P", passenger = "DOE/JANE MRS", seat = "32A")
 
-    /** The sheet's content on the sheet's own colour. */
-    private fun editor(name: String, dark: Boolean, form: () -> FlightForm, isNew: Boolean) = compose.screenshot(name, dark) {
+    private val passes = bundle(
+        listOf(
+            Document(1, booked.departureDate, "TR", DocumentKind.BOARDING_PASS, "Boarding pass: TK 68 IST→BKK", file = "pass.pdf", flightId = 2),
+            Document(2, booked.arrivalDate, "TH", DocumentKind.BOARDING_PASS, "Boarding pass: TK 68 IST→BKK", file = "pass.pdf", flightId = 2),
+            Document(3, booked.departureDate, "TR", DocumentKind.BOOKING, "Booking: TK 68 IST→BKK", text = "Booking reference QX7Z2P", flightId = 2),
+        ),
+    )
+
+    /** The sheet's content on the sheet's own colour; a saved flight shows its evidence. */
+    private fun editor(name: String, dark: Boolean, form: () -> FlightForm, isNew: Boolean, pasted: PasteResult? = null) = compose.screenshot(name, dark) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
             FlightEditorContent(
-                form = androidx.compose.runtime.remember { form() },
+                form = remember { form() },
                 isNew = isNew,
                 impact = Sample.statuses.filter { it.forecast != null }.take(2),
-                pasteMessage = null,
+                pasted = pasted,
                 onPaste = {},
                 onPickAirport = {},
                 onPickDate = {},
@@ -54,13 +68,27 @@ class PlanFlightsImportScreenshotTest {
                 onSave = {},
                 onDelete = if (isNew) null else ({}),
                 modifier = Modifier.padding(top = 24.dp),
+                evidence = if (isNew) null else ({ FlightEvidenceList(passes, busy = false, message = null, onAdd = {}, onOpen = {}) }),
             )
         }
     }
 
     @Test fun flightEditorNew() = editor("flight_editor_new", dark = false, form = { FlightForm(null) }, isNew = true)
 
-    @Test fun flightEditorBooked() = editor("flight_editor_booked_dark", dark = true, form = { FlightForm(booked) }, isNew = false)
+    @Test fun flightEditorNewDark() = editor("flight_editor_new_dark", dark = true, form = { FlightForm(null) }, isNew = true)
+
+    @Test
+    fun flightEditorPasted() = editor(
+        "flight_editor_pasted",
+        dark = false,
+        form = { FlightForm(Sample.flights[3].copy(id = 0, departureMinute = null, arrivalMinute = null)) },
+        isNew = true,
+        pasted = PasteResult("Filled in from the copied text. Check the details.", filled = true),
+    )
+
+    @Test fun flightEditorBooked() = editor("flight_editor_booked", dark = false, form = { FlightForm(booked) }, isNew = false)
+
+    @Test fun flightEditorBookedDark() = editor("flight_editor_booked_dark", dark = true, form = { FlightForm(booked) }, isNew = false)
 
     private fun cards(name: String, dark: Boolean) = compose.screenshot(name, dark) {
         Surface(color = MaterialTheme.colorScheme.surface) {
