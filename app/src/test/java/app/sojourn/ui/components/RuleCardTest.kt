@@ -33,10 +33,10 @@ class RuleCardTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun show(status: RuleStatus, onClick: (() -> Unit)? = null) {
+    private fun show(status: RuleStatus, expanded: Boolean = false, onClick: (() -> Unit)? = null) {
         compose.setContent {
             SojournTheme(ThemeMode.DARK, dynamicColor = false) {
-                RuleCard(status, showForecast = false, onClick = onClick)
+                RuleCard(status, showForecast = false, expanded = expanded, onClick = onClick)
             }
         }
     }
@@ -74,20 +74,22 @@ class RuleCardTest {
     }
 
     @Test
-    fun detailsCanBeOpenedAndClosedWithoutEditingTheRule() {
-        var edits = 0
-        show(ResidencySamples.spain(withAbsences = true), onClick = { edits++ })
-        compose.onNodeWithText("Details").performClick()
+    fun theWholeCardIsOneTapThatOpensTheRule() {
+        var opened = 0
+        show(ResidencySamples.spain(withAbsences = true), onClick = { opened++ })
+        compose.onNodeWithText("Details").assertDoesNotExist()
+        compose.onNodeWithText("Not enough days left").performClick()
+        assertEquals(1, opened)
+    }
+
+    @Test
+    fun expandedCardShowsTheBreakdown() {
+        show(ResidencySamples.spain(withAbsences = true), expanded = true)
         compose.onNodeWithText("Trips outside Spain").assertIsDisplayed()
         compose.onNodeWithText("237 days if return trips outside Spain are counted too.").assertIsDisplayed()
         compose.onNodeWithText("Not included in your current day count.").assertIsDisplayed()
         compose.onNodeWithText("183-day rule", substring = true).assertExists()
         compose.onNodeWithText("Counting sporadic absences:", substring = true).assertExists()
-        assertEquals(0, edits)
-        compose.onNodeWithText("Hide details").performClick()
-        compose.onNodeWithText("183-day rule", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("Trips outside Spain").assertDoesNotExist()
-        compose.onNodeWithText("Not enough days left").assertIsDisplayed()
     }
 
     @Test

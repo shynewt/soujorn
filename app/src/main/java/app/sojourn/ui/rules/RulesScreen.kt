@@ -32,6 +32,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,7 +48,6 @@ import app.sojourn.AppContainer
 import app.sojourn.data.CountrySet
 import app.sojourn.data.db.Rule
 import app.sojourn.domain.CountingPolicies
-import app.sojourn.domain.RuleEngine
 import app.sojourn.domain.RulePreset
 import app.sojourn.domain.RuleStatus
 import app.sojourn.ui.components.segmentedColors
@@ -72,13 +73,14 @@ data class RulesState(
     val policies: CountingPolicies = CountingPolicies(),
 )
 
+/** The rules, with their statuses as the rest of the app sees them (`repository.statuses`). */
 class RulesViewModel(container: AppContainer) : ViewModel() {
     private val repository = container.repository
 
-    val state: StateFlow<RulesState> = combine(repository.book, repository.rules, repository.traveller) { book, rules, traveller ->
+    val state: StateFlow<RulesState> = combine(repository.book, repository.rules, repository.statuses) { book, rules, statuses ->
         RulesState(
             loaded = true,
-            active = rules.filter { it.enabled }.map { RuleEngine.evaluate(it, book, traveller) },
+            active = statuses,
             paused = rules.filter { !it.enabled },
             recents = book.recentCountries(),
             policies = book.policies,
@@ -94,23 +96,29 @@ class RulesViewModel(container: AppContainer) : ViewModel() {
     }
 }
 
+/**
+ * Every rule, active ones as cards and paused ones as a list. With [ruleId], that rule's
+ * editor opens straight away (from a card elsewhere); closing it leaves you on this list.
+ */
 @Composable
 fun RulesScreen(ruleId: Long?, back: () -> Unit) {
-    RulesScreen(back)
-}
-
-@Composable
-private fun RulesScreen(back: () -> Unit) {
     val vm = appViewModel { RulesViewModel(it) }
     val state by vm.state.collectAsStateWithLifecycle()
     var choosing by remember { mutableStateOf(false) }
     var presetNeedingCountry by remember { mutableStateOf<RulePreset?>(null) }
     var editing by remember { mutableStateOf<Rule?>(null) }
+    // Opened once per visit, so turning the phone or coming back doesn't reopen it.
+    var opened by rememberSaveable { mutableStateOf(ruleId == null) }
+    LaunchedEffect(state.loaded) {
+        if (opened || !state.loaded) return@LaunchedEffect
+        opened = true
+        editing = state.active.firstOrNull { it.rule.id == ruleId }?.rule ?: state.paused.firstOrNull { it.id == ruleId }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Limits & residency", style = MaterialTheme.typography.titleLargeEmphasized) },
+                title = { Text("Rules", style = MaterialTheme.typography.titleLargeEmphasized) },
                 navigationIcon = { IconButton(onClick = back) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") } },
             )
         },
@@ -118,7 +126,7 @@ private fun RulesScreen(back: () -> Unit) {
             ExtendedFloatingActionButton(
                 onClick = { choosing = true },
                 icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                text = { Text("Add rule") },
+                text = { Text("Add a rule") },
             )
         },
     ) { padding ->
@@ -175,6 +183,7 @@ private fun RulesScreen(back: () -> Unit) {
     editing?.let { rule ->
         RuleEditorSheet(
             initial = rule,
+            status = state.active.firstOrNull { it.rule.id == rule.id && rule.id != 0L },
             recents = state.recents,
             policies = state.policies,
             onDismiss = { editing = null },
