@@ -48,7 +48,7 @@ jobs:
         run: |
           docker run --rm -u 0:0 -v "$PWD":/project -w /project -e GRADLE_USER_HOME=/project/.gradle-build-cache sojourn-build \
             ./gradlew --no-daemon -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME" testDebugUnitTest assembleRelease
-          sudo chown -R "$(id -u):$(id -g)" .gradle-build-cache app/build
+          sudo chown -R "$(id -u):$(id -g)" .
 
       - name: Sign
         env:
