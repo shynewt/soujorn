@@ -41,6 +41,9 @@ data class FlightDto(
     val departureMinute: Int? = null,
     val arrivalMinute: Int? = null,
     val note: String = "",
+    val reference: String = "",
+    val passenger: String = "",
+    val seat: String = "",
 )
 
 @Serializable
@@ -94,6 +97,7 @@ object BackupCodec {
                 FlightDto(
                     it.number, it.origin, it.destination, it.originCountry, it.destinationCountry,
                     it.departureDate.toString(), it.arrivalDate.toString(), it.departureMinute, it.arrivalMinute, it.note,
+                    it.reference, it.passenger, it.seat,
                 )
             },
         ),
@@ -130,6 +134,9 @@ object BackupCodec {
             departureMinute = it.departureMinute,
             arrivalMinute = it.arrivalMinute,
             note = it.note,
+            reference = it.reference,
+            passenger = it.passenger,
+            seat = it.seat,
         )
     }
 

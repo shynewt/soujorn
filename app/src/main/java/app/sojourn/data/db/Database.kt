@@ -83,6 +83,11 @@ data class Flight(
     val departureMinute: Int? = null,
     val arrivalMinute: Int? = null,
     val note: String = "",
+    /** The booking reference (PNR), as the boarding pass or booking gives it. */
+    @ColumnInfo(defaultValue = "") val reference: String = "",
+    /** Who flew, as the airline writes it ("DOE/JANE MRS"). */
+    @ColumnInfo(defaultValue = "") val passenger: String = "",
+    @ColumnInfo(defaultValue = "") val seat: String = "",
 )
 
 /** What a piece of evidence is. */
@@ -119,6 +124,11 @@ data class Document(
     /** For photos: other photos of the same day and country, one per line, to choose from. */
     val candidates: String = "",
     val addedAt: Long = System.currentTimeMillis(),
+    /** The last day it covers, for a period (a utility bill's, a lease's); null for one day. */
+    val until: LocalDate? = null,
+    /** The flight it backs up, for a boarding pass, a flight's calendar event or booking. */
+    val flightId: Long? = null,
+    @ColumnInfo(defaultValue = "") val note: String = "",
 )
 
 /** A photo document's other photos to choose from. */
@@ -365,6 +375,18 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
 }
 
 /** Adds the sources that back up each day, and the documents that show them. */
+/** Flights keep their booking reference, passenger and seat; evidence can cover a period and name its flight. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE flights ADD COLUMN reference TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE flights ADD COLUMN passenger TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE flights ADD COLUMN seat TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE documents ADD COLUMN until INTEGER")
+        db.execSQL("ALTER TABLE documents ADD COLUMN flightId INTEGER")
+        db.execSQL("ALTER TABLE documents ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE presence ADD COLUMN evidence INTEGER NOT NULL DEFAULT 0")
@@ -430,7 +452,7 @@ interface FlightDao {
     suspend fun clearAll()
 }
 
-@Database(entities = [Presence::class, Plan::class, Rule::class, Flight::class, Document::class], version = 5)
+@Database(entities = [Presence::class, Plan::class, Rule::class, Flight::class, Document::class], version = 6)
 @TypeConverters(Converters::class)
 abstract class SojournDatabase : RoomDatabase() {
     abstract fun presence(): PresenceDao
@@ -445,6 +467,6 @@ abstract class SojournDatabase : RoomDatabase() {
 
     companion object {
         fun create(context: Context): SojournDatabase =
-            Room.databaseBuilder(context, SojournDatabase::class.java, "sojourn.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
+            Room.databaseBuilder(context, SojournDatabase::class.java, "sojourn.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
     }
 }

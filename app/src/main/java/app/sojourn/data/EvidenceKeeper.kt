@@ -28,7 +28,13 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
      * Keeps [original]'s source on [places] (day and country), titled after [trip]. Files are
      * copied once per source through [copies]. Returns how many documents were new.
      */
-    suspend fun keep(trip: FoundTrip, original: FoundTrip, places: List<Pair<LocalDate, String>>, copies: MutableMap<String, String?> = HashMap()): Int {
+    suspend fun keep(
+        trip: FoundTrip,
+        original: FoundTrip,
+        places: List<Pair<LocalDate, String>>,
+        copies: MutableMap<String, String?> = HashMap(),
+        flightId: Long? = null,
+    ): Int {
         val kind = when (original.rawKind) {
             RawKind.CALENDAR_EVENT -> DocumentKind.CALENDAR_EVENT
             RawKind.BOOKING -> DocumentKind.BOOKING
@@ -37,7 +43,7 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
         }
         val title = title(kind, trip)
         if (kind != DocumentKind.BOARDING_PASS) {
-            return places.count { (day, country) -> repository.addDocument(Document(day = day, country = country, kind = kind, title = title, text = original.raw.orEmpty())) }
+            return places.count { (day, country) -> repository.addDocument(Document(day = day, country = country, kind = kind, title = title, text = original.raw.orEmpty(), flightId = flightId)) }
         }
         val source = original.file ?: return 0
         // A file already kept for these days, from an earlier share or import, isn't kept again.
@@ -48,7 +54,7 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
         if (fresh.isEmpty()) return 0
         val file = copies.getOrPut(source) { store.keep(Uri.parse(source), original.fileName ?: "boarding-pass") } ?: return 0
         return fresh.count { (day, country) ->
-            repository.addDocument(Document(day = day, country = country, kind = kind, title = title, file = file, text = original.raw.orEmpty()))
+            repository.addDocument(Document(day = day, country = country, kind = kind, title = title, file = file, text = original.raw.orEmpty(), flightId = flightId))
         }
     }
 
@@ -75,7 +81,9 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
         val trip = FoundTrip(TripKind.FLIGHT, flight.departureDate, flight.arrivalDate, number = number, from = flight.origin, to = flight.destination)
         val original = own ?: trip.copy(file = uri.toString(), fileName = travel.displayName(uri), rawKind = RawKind.BOARDING_PASS)
         val places = listOf(flight.departureDate to flight.originCountry, flight.arrivalDate to flight.destinationCountry).distinct()
-        val kept = keep(trip, original, places)
+        val kept = keep(trip, original, places, flightId = flight.id)
+        // The pass fills in what the flight didn't know: its booking reference, passenger, seat.
+        if (own != null) repository.enrichFlight(flight, own)
         return if (kept > 0) Attached.Kept(kept) else Attached.AlreadyKept
     }
 
@@ -83,7 +91,7 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
     fun forFlight(flight: Flight, documents: List<Document>): List<Document> {
         val route = "${flight.origin}→${flight.destination}"
         return documents.filter { doc ->
-            doc.kind != DocumentKind.PHOTO && route in doc.title &&
+            doc.kind != DocumentKind.PHOTO && doc.flightId == flight.id || doc.flightId == null && doc.kind != DocumentKind.PHOTO && route in doc.title &&
                 (doc.day == flight.departureDate && doc.country == flight.originCountry || doc.day == flight.arrivalDate && doc.country == flight.destinationCountry)
         }
     }

@@ -8,6 +8,7 @@ import app.sojourn.data.db.MIGRATION_1_2
 import app.sojourn.data.db.MIGRATION_2_3
 import app.sojourn.data.db.MIGRATION_3_4
 import app.sojourn.data.db.MIGRATION_4_5
+import app.sojourn.data.db.MIGRATION_5_6
 import app.sojourn.data.db.SojournDatabase
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -91,6 +92,30 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM documents").use { cursor ->
             cursor.moveToFirst()
             assertEquals(1, cursor.getInt(0))
+        }
+    }
+
+    @Test
+    fun version5To6KeepsFlightsAndDocuments() {
+        helper.createDatabase(NAME, 5).apply {
+            execSQL(
+                "INSERT INTO flights (number, origin, destination, originCountry, destinationCountry, departureDate, arrivalDate, note) " +
+                    "VALUES ('W64666', 'BCN', 'LCA', 'ES', 'CY', 20465, 20466, '')",
+            )
+            execSQL("INSERT INTO documents (day, country, kind, title, text, candidates, addedAt) VALUES (20465, 'ES', 'BOARDING_PASS', 'Boarding pass', '', '', 0)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(NAME, 6, true, MIGRATION_5_6)
+        db.query("SELECT number, reference, passenger, seat FROM flights").use { cursor ->
+            cursor.moveToFirst()
+            assertEquals("W64666", cursor.getString(0))
+            assertEquals("", cursor.getString(1))
+        }
+        db.query("SELECT until, flightId, note FROM documents").use { cursor ->
+            cursor.moveToFirst()
+            assertEquals(true, cursor.isNull(0))
+            assertEquals(true, cursor.isNull(1))
+            assertEquals("", cursor.getString(2))
         }
     }
 

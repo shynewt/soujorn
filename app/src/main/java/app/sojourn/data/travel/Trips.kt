@@ -33,6 +33,8 @@ data class FoundTrip(
     /** Where it was found, e.g. "Boarding pass" or the email's subject. */
     val source: String = "",
     val reference: String? = null,
+    /** The seat, from a boarding pass. */
+    val seat: String? = null,
     /** What it was found in, to keep as evidence: a calendar event as iCalendar, or a booking's text. */
     val raw: String? = null,
     val rawKind: RawKind? = null,

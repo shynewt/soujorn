@@ -106,5 +106,8 @@ internal fun FoundTrip.asFlight(fromCountry: String?, toCountry: String?): Fligh
         departureMinute = departureMinute,
         arrivalMinute = arrivalMinute,
         note = source.take(80),
+        reference = reference.orEmpty(),
+        passenger = passenger.orEmpty(),
+        seat = seat.orEmpty(),
     )
 }

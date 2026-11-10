@@ -60,6 +60,9 @@ object FlightMatch {
             departureMinute = keep.departureMinute ?: other.departureMinute,
             arrivalMinute = keep.arrivalMinute ?: other.arrivalMinute,
             note = keep.note.ifBlank { other.note },
+            reference = keep.reference.ifBlank { other.reference },
+            passenger = keep.passenger.ifBlank { other.passenger },
+            seat = keep.seat.ifBlank { other.seat },
         )
     }
 

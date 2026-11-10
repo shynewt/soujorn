@@ -50,6 +50,7 @@ object Bcbp {
                 passenger = passenger,
                 source = "Boarding pass",
                 reference = reference.takeIf { it.isNotEmpty() },
+                seat = text.substring(offset + 25, offset + 29).trim().trimStart('0').takeIf { it.isNotEmpty() },
             )
             // Each leg's mandatory part is 37 characters, then a variable part whose length is
             // the two hex digits at its end; later legs follow it.

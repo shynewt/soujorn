@@ -1,5 +1,6 @@
 package app.sojourn.data
 
+import app.sojourn.data.travel.FoundTrip
 import androidx.room.withTransaction
 import app.sojourn.data.BackupCodec.flightEntities
 import app.sojourn.data.BackupCodec.planEntities
@@ -16,6 +17,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import app.sojourn.data.flights.FlightMatch
+import app.sojourn.data.flights.Airlines
 import app.sojourn.data.db.Plan
 import app.sojourn.data.db.Presence
 import app.sojourn.data.db.Rule
@@ -419,7 +421,17 @@ class Repository(
         db.withTransaction {
             val known = db.flights().all().toMutableList()
             for (flight in flights) {
-                if (known.any { FlightMatch.same(it, flight) }) continue
+                // A flight already saved keeps what this copy adds: its booking reference,
+                // passenger, seat, number or times.
+                val existing = known.indexOfFirst { FlightMatch.same(it, flight) }
+                if (existing >= 0) {
+                    val merged = FlightMatch.merge(known[existing], flight).copy(id = known[existing].id)
+                    if (merged != known[existing]) {
+                        db.flights().upsert(merged)
+                        known[existing] = merged
+                    }
+                    continue
+                }
                 db.flights().upsert(flight)
                 known += flight
                 added++
@@ -429,6 +441,21 @@ class Repository(
         onDaysChanged()
         return FlightImport(added, flights.size - added, removed)
     }
+
+    /** Fills in what a boarding pass or booking tells about a saved flight and it didn't know. */
+    suspend fun enrichFlight(flight: Flight, found: FoundTrip) {
+        val current = db.flights().all().firstOrNull { it.id == flight.id } ?: return
+        val updated = current.copy(
+            number = current.number.ifBlank { found.number.filter { it.isLetterOrDigit() } },
+            reference = current.reference.ifBlank { found.reference.orEmpty() },
+            passenger = current.passenger.ifBlank { found.passenger.orEmpty() },
+            seat = current.seat.ifBlank { found.seat.orEmpty() },
+        )
+        if (updated != current) recordChange("Filled in flight ${Airlines.format(updated.number)}".trim()) { db.flights().upsert(updated) }
+    }
+
+    /** The saved flight [flight] is the same as, if any. */
+    suspend fun savedFlight(flight: Flight): Flight? = db.flights().all().firstOrNull { FlightMatch.same(it, flight) }
 
     /** Removes saved flights that are the same flight twice, keeping what each copy knew. */
     suspend fun removeDuplicateFlights(): Int = recordChange("Merged duplicate flights") {

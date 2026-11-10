@@ -244,7 +244,10 @@ class ImportViewModel(private val container: AppContainer) : ViewModel() {
         }
         // Flights are checked against the saved ones once more as they're written, so an
         // import run twice, or a flight already entered by hand, never ends up there twice.
-        val result = repository.importFlights(flights)
+        // Flights already saved are passed too: they only gain what these copies add (booking
+        // reference, passenger, seat), never a second copy.
+        val known = trips.items.filter { it.duplicate && it.usable }.mapNotNull { it.trip.asFlight(it.fromCountry, it.toCountry) }
+        val result = repository.importFlights(flights + known).let { it.copy(skipped = it.skipped - known.size) }
         // Keep what each trip was found in as evidence, for the trips added and for those
         // already there: a calendar event, a booking's text, a boarding pass file.
         val kept = keepEvidence(chosen + trips.items.filter { it.duplicate && it.usable })
@@ -264,8 +267,9 @@ class ImportViewModel(private val container: AppContainer) : ViewModel() {
                 item.fromCountry?.takeIf { item.trip.kind != TripKind.STAY }?.let { item.trip.departure to it },
                 item.toCountry?.let { item.trip.arrival to it },
             ).distinct()
+            val flightId = item.trip.asFlight(item.fromCountry, item.toCountry)?.let { container.repository.savedFlight(it)?.id }
             for (original in (listOf(item.trip) + item.copies).distinctBy { listOf(it.rawKind, it.file ?: it.raw) }) {
-                kept += container.keeper.keep(item.trip, original, places, copies)
+                kept += container.keeper.keep(item.trip, original, places, copies, flightId)
             }
         }
         return kept
