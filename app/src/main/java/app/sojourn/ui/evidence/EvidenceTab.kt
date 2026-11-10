@@ -1,5 +1,6 @@
 package app.sojourn.ui.evidence
 
+import app.sojourn.ui.components.YearMenu
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -99,7 +100,7 @@ fun EvidenceContent(state: EvidenceState, onYear: (Int) -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text("Evidence", style = MaterialTheme.typography.titleLargeEmphasized) },
-                actions = { YearPicker(state.year, state.years, onYear) },
+                actions = { YearMenu(state.year, state.years, { it?.let(onYear) }) },
             )
         },
         floatingActionButton = {
@@ -203,29 +204,6 @@ private data class Report(val icon: ImageVector, val title: String, val text: St
 /** A new piece of evidence starts on today in this year, or on the year's last day before. */
 private fun defaultDay(state: EvidenceState): LocalDate =
     if (state.year == state.today.year) state.today else LocalDate.of(state.year, 12, 31)
-
-@Composable
-private fun YearPicker(year: Int, years: List<Int>, onYear: (Int) -> Unit) {
-    if (years.size <= 1) {
-        Text("$year", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(end = 16.dp))
-        return
-    }
-    var open by remember { mutableStateOf(false) }
-    Box {
-        TextButton(onClick = { open = true }, enabled = years.size > 1, modifier = Modifier.semantics { contentDescription = "Year $year, change" }) {
-            Text("$year", style = MaterialTheme.typography.titleMedium)
-            if (years.size > 1) Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            years.forEach {
-                DropdownMenuItem(text = { Text("$it") }, onClick = {
-                    onYear(it)
-                    open = false
-                })
-            }
-        }
-    }
-}
 
 /** The colours of the evidence tiers: presence in the primary hue, strongest fullest; each is also named in words. */
 @Composable

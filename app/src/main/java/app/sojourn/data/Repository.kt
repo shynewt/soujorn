@@ -78,13 +78,18 @@ class Repository(
         }
     }.distinctUntilChanged()
 
+    /** Flights with a boarding pass kept, whose days in between count as proven. */
+    private val passes: Flow<Set<Long>> = db.documents().observeAll()
+        .map { docs -> docs.filter { it.kind == DocumentKind.BOARDING_PASS }.mapNotNullTo(HashSet()) { it.flightId } }
+        .distinctUntilChanged()
+
     val book: Flow<DayBook> = combine(
-        db.presence().observeAll(),
+        combine(db.presence().observeAll(), passes, ::Pair),
         plans,
         flights,
         settings.map { CountingOptions(it.fillGaps, it.policies) }.distinctUntilChanged(),
         today,
-    ) { presence, plans, flights, options, today -> DayBook.build(presence, plans, options, today, flights) }
+    ) { (presence, passes), plans, flights, options, today -> DayBook.build(presence, plans, options, today, flights, passes) }
         .flowOn(Dispatchers.Default)
         .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 

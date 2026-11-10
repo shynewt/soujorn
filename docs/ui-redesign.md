@@ -19,13 +19,15 @@ whose purpose — knowing where you stand and being able to prove it — shows i
 
 ## Structure
 
-Four tabs, each answering one question:
+Three tabs, each answering one question. (A fourth, Plan, was removed after use: its upcoming
+flights and stays were the Calendar list's "Ahead", its rule effects were already on the rule
+cards, and adding a stay or flight lives on Today's + and the day sheet. Its year forecast moved
+to the Calendar's Year view.)
 
 | Tab | Question | Holds |
 | --- | --- | --- |
 | **Today** | Where do I stand? | Where you are now, what needs attention, rule status, next flight, this year by country |
 | **Calendar** | What happened? | The record of days: month, year and list (the old Timeline) views; day sheet with countries, flights and evidence |
-| **Plan** | What if? | The year ahead: forecast, limits ahead, upcoming flights and stays |
 | **Evidence** | Can I prove it? | The vault per year: coverage, documents by group, a checklist of period documents, export and reports |
 
 Off the bar, opened from where they're needed:
@@ -53,11 +55,6 @@ Segmented Month · Year · List. List is the old Timeline (stays, crossings, gap
 Every view opens the same day sheet with: countries (confirm/remove), flights (open), **Add a
 flight**, evidence (photos to choose, files), **Add evidence**, and clear with confirmation.
 Every edit, from any view or sheet, offers Undo.
-
-## Plan
-
-Forecast for this year and next; limits ahead (tap → rule); upcoming flights; upcoming stays.
-FAB menu: Add a flight · Plan a stay. Past-plan confirmation moves to Today's attention list.
 
 ## Evidence
 
@@ -88,6 +85,10 @@ flight lacked. Evidence names its flight (`Document.flightId`).
 
 ## Consistency rules
 
+- Years are always chosen from a menu ("2026 ▾", newest first, "All time" where it makes
+  sense), never a row of buttons: ten years of use must fit.
+- Days between a kept boarding pass into a country and the next kept pass out of it count as
+  documented there, whatever else recorded them (`Day.between`).
 - One country palette, assigned from all-time days, used everywhere.
 - Words: **Untracked** (no country), **Assumed** (filled between two same-country days),
   **Planned**, **Recorded**; **Rules** for limits and residency; **Citizenship** everywhere.

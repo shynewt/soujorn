@@ -71,6 +71,23 @@ class DayBookTest {
     }
 
     @Test
+    fun daysBetweenTwoKeptBoardingPassesAreDocumented() {
+        // Three days in Poland entered by hand, flown in and out with both passes kept.
+        val inbound = app.sojourn.data.db.Flight(1, "FR1", "BCN", "WAW", "ES", "PL", LocalDate.parse("2026-10-05"), LocalDate.parse("2026-10-05"), 9 * 60, 12 * 60)
+        val outbound = app.sojourn.data.db.Flight(2, "FR2", "WAW", "BCN", "PL", "ES", LocalDate.parse("2026-10-08"), LocalDate.parse("2026-10-08"), 18 * 60, 21 * 60)
+        val rows = listOf("2026-10-06", "2026-10-07").map { Presence(LocalDate.parse(it), "PL", Source.MANUAL) }
+        val poland = CountrySet(setOf("PL"))
+        val range = LocalDate.parse("2026-10-05") to LocalDate.parse("2026-10-08")
+        fun build(passes: Set<Long>) = DayBook.build(rows, emptyList(), CountingOptions(), today, listOf(inbound, outbound), passes)
+        assertEquals(Evidence.MANUAL, build(emptySet())[LocalDate.parse("2026-10-06")]!!.evidenceOf("PL"))
+        val proven = build(setOf(1, 2))
+        assertEquals(Evidence.DOCUMENTED, proven[LocalDate.parse("2026-10-06")]!!.evidenceOf("PL"))
+        assertEquals(4, proven.evidence(range.first, range.second, poland).documented)
+        // One pass alone proves only its own flight's day.
+        assertEquals(Evidence.MANUAL, build(setOf(1))[LocalDate.parse("2026-10-07")]!!.evidenceOf("PL"))
+    }
+
+    @Test
     fun gapFillingCanBeTurnedOff() {
         val book = book(listOf(day("2026-10-01", "PT"), day("2026-10-05", "PT")), options = CountingOptions(fillGaps = false))
         assertNull(book[LocalDate.parse("2026-10-03")])

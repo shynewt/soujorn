@@ -14,11 +14,9 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.EditCalendar
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.FolderCopy
 import androidx.compose.material.icons.rounded.CalendarMonth
-import androidx.compose.material.icons.rounded.EditCalendar
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.FolderCopy
 import androidx.compose.material3.Icon
@@ -64,7 +62,6 @@ import app.sojourn.ui.calendar.CalendarScreen
 import app.sojourn.ui.home.HomeScreen
 import app.sojourn.ui.onboarding.OnboardingScreen
 import app.sojourn.ui.imports.ImportScreen
-import app.sojourn.ui.plan.PlanScreen
 import app.sojourn.ui.reports.FeieScreen
 import app.sojourn.ui.reports.HistoryScreen
 import app.sojourn.ui.rules.RulesScreen
@@ -77,8 +74,6 @@ import kotlinx.serialization.Serializable
 @Serializable data object HomeRoute
 
 @Serializable data object CalendarRoute
-
-@Serializable data object PlanRoute
 
 @Serializable data object EvidenceTabRoute
 
@@ -99,7 +94,6 @@ import kotlinx.serialization.Serializable
 private enum class Tab(val app: AppTab, val route: Any, val type: KClass<*>, val label: String, val icon: ImageVector, val selected: ImageVector) {
     TODAY(AppTab.TODAY, HomeRoute, HomeRoute::class, "Today", Icons.Outlined.Explore, Icons.Rounded.Explore),
     CALENDAR(AppTab.CALENDAR, CalendarRoute, CalendarRoute::class, "Calendar", Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
-    PLAN(AppTab.PLAN, PlanRoute, PlanRoute::class, "Plan", Icons.Outlined.EditCalendar, Icons.Rounded.EditCalendar),
     EVIDENCE(AppTab.EVIDENCE, EvidenceTabRoute, EvidenceTabRoute::class, "Evidence", Icons.Outlined.FolderCopy, Icons.Rounded.FolderCopy),
 }
 
@@ -199,7 +193,6 @@ private fun MainScaffold() {
             ) {
                 composable<HomeRoute> { HomeScreen() }
                 composable<CalendarRoute> { CalendarScreen() }
-                composable<PlanRoute> { PlanScreen() }
                 composable<EvidenceTabRoute> { EvidenceTab() }
                 pushed<SettingsRoute> { entry ->
                     val route = entry.toRoute<SettingsRoute>()

@@ -27,8 +27,6 @@ import app.sojourn.ui.imports.ImportSources
 import app.sojourn.ui.home.homeState
 import app.sojourn.ui.onboarding.OnboardingContent
 import app.sojourn.ui.onboarding.SojournMark
-import app.sojourn.ui.plan.PlanContent
-import app.sojourn.ui.plan.planState
 import app.sojourn.data.CalendarView
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -148,16 +146,6 @@ class ScreensScreenshotTest {
             androidx.compose.foundation.layout.Box(Modifier.padding(padding)) { app.sojourn.ui.imports.TripsPreview(Sample.trips) }
         }
     }
-
-    private fun plan(name: String, dark: Boolean) = compose.screenshot(name, dark) {
-        androidx.compose.runtime.CompositionLocalProvider(app.sojourn.ui.LocalCountryColors provides app.sojourn.ui.theme.CountryPalette.assign(listOf("PT", "US", "MX", "ME", "ES", "GB", "FR", "TH", "VN"))) {
-            PlanContent(planState(Sample.book, Sample.plans, Sample.statuses, Sample.today.year), {})
-        }
-    }
-
-    @Test fun plan() = plan("plan", dark = false)
-
-    @Test fun planDark() = plan("plan_dark", dark = true)
 
     @Test fun calendarList() = calendar("calendar_list", CalendarView.LIST)
 

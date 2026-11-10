@@ -35,8 +35,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** The four places the app is organised in; see docs/ui-redesign.md. */
-enum class AppTab { TODAY, CALENDAR, PLAN, EVIDENCE }
+/** The three places the app is organised in; see docs/ui-redesign.md. */
+enum class AppTab { TODAY, CALENDAR, EVIDENCE }
 
 /** A part of Settings to open at. */
 enum class SettingsSection { TRACKING, COUNTING, ABOUT_YOU, NOTIFICATIONS, APPEARANCE, DATA }

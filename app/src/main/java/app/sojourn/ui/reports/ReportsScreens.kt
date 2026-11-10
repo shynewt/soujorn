@@ -1,5 +1,6 @@
 package app.sojourn.ui.reports
 
+import app.sojourn.ui.components.PeriodMenu
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -90,37 +91,6 @@ internal fun ReportScaffold(title: String, back: () -> Unit, actions: @Composabl
         },
         content = content,
     )
-}
-
-/**
- * The period a report covers, chosen in the top bar ("2026 ▾"), the way the Evidence tab
- * chooses its year, so every yearly view is switched in the same place.
- */
-@Composable
-internal fun <T> PeriodMenu(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit, description: String) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        TextButton(onClick = { open = true }) {
-            Text(options.firstOrNull { it.first == selected }?.second.orEmpty(), style = MaterialTheme.typography.titleMedium)
-            Icon(Icons.Rounded.ArrowDropDown, contentDescription = description)
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            options.forEach { (value, label) ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        open = false
-                        onSelect(value)
-                    },
-                    trailingIcon = if (value == selected) {
-                        { Icon(Icons.Rounded.Check, contentDescription = "Selected") }
-                    } else {
-                        null
-                    },
-                )
-            }
-        }
-    }
 }
 
 private fun share(context: Context, subject: String, text: String) {

@@ -1,5 +1,6 @@
 package app.sojourn.ui.home
 
+import app.sojourn.ui.components.YearMenu
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -182,9 +183,11 @@ fun HomeContent(
                         else -> state.year.toString()
                     },
                     Modifier.padding(top = 8.dp),
-                )
+                ) {
+                    // A menu, so years of history fit; "All time" sums them.
+                    if (state.years.size > 1) YearMenu(state.year, state.years, onYear, allTime = true)
+                }
             }
-            if (state.years.size > 1) item(key = "years") { YearSwitcher(state.years, state.year, onYear) }
             item(key = "summary") { SummaryCard(state, map) }
         }
     }
@@ -367,12 +370,6 @@ private fun TrackingRow(state: HomeState, onCheckNow: () -> Unit) {
             FilledTonalIconButton(onClick = onCheckNow) { Icon(Icons.Rounded.Refresh, contentDescription = "Check now") }
         }
     }
-}
-
-@Composable
-private fun YearSwitcher(years: List<Int>, selected: Int?, onYear: (Int?) -> Unit) {
-    val options: List<Int?> = years.take(3).reversed() + listOf(null)
-    ChoiceGroup(options.map { it to (it?.toString() ?: "All time") }, selected, onYear)
 }
 
 @Composable
