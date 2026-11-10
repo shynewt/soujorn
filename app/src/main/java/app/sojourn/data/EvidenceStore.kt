@@ -64,6 +64,13 @@ class EvidenceStore(private val context: Context, private val dir: File) {
         return sha.digest().joinToString("") { "%02x".format(it) }
     }
 
+    /** The pack's folder for a kind: "boarding-passes", "utility-bills"… */
+    private fun folder(kind: DocumentKind): String = when (kind) {
+        DocumentKind.BOARDING_PASS -> "boarding-passes"
+        DocumentKind.BOOKING -> "bookings"
+        else -> kind.name.lowercase().replace('_', '-') + "s"
+    }
+
     /** What's in a year's pack, and what couldn't be copied. */
     data class PackResult(val days: Int, val files: Int, val missing: List<String>)
 
@@ -76,7 +83,10 @@ class EvidenceStore(private val context: Context, private val dir: File) {
     suspend fun writePack(out: OutputStream, year: Int, book: DayBook, documents: List<Document>): PackResult = withContext(Dispatchers.IO) {
         val from = LocalDate.of(year, 1, 1)
         val to = minOf(LocalDate.of(year, 12, 31), book.today)
-        val inYear = documents.filter { it.day in from..to }
+        // Period documents (a lease, a year's bills) count for every year they overlap.
+        val inYear = documents.filter { it.day <= to && (it.until ?: it.day) >= from }
+        // One file backing two days (a pass's departure and arrival) goes in once.
+        val copiedFiles = HashMap<String, String>()
         val missing = mutableListOf<String>()
         val paths = HashMap<Long, String>()
         var files = 0
@@ -106,24 +116,30 @@ class EvidenceStore(private val context: Context, private val dir: File) {
                             missing += "${doc.day} ${Countries.name(doc.country)}: photo no longer in the gallery"
                         }
                     }
-                    DocumentKind.BOARDING_PASS -> {
-                        val stored = doc.file?.let { File(dir, it) }
-                        if (stored == null || !stored.exists()) {
+                    DocumentKind.CALENDAR_EVENT -> paths[doc.id] = "calendar.ics"
+                    else -> {
+                        val name = doc.file
+                        if (name == null) {
+                            // Text only, like a booking's confirmation.
+                            if (doc.text.isBlank()) continue
+                            val path = nameFor(doc, folder(doc.kind), "txt")
+                            put(path) { it.write(doc.text.toByteArray()) }
+                            paths[doc.id] = path
+                            files++
+                            continue
+                        }
+                        copiedFiles[name]?.let { paths[doc.id] = it; continue }
+                        val stored = File(dir, name)
+                        if (!stored.exists()) {
                             missing += "${doc.day} ${Countries.name(doc.country)}: ${doc.title}, file missing"
                             continue
                         }
-                        val path = nameFor(doc, "boarding-passes", stored.extension.ifBlank { "bin" })
+                        val path = nameFor(doc, folder(doc.kind), stored.extension.ifBlank { "bin" })
                         put(path) { o -> stored.inputStream().use { it.copyTo(o) } }
+                        copiedFiles[name] = path
                         paths[doc.id] = path
                         files++
                     }
-                    DocumentKind.BOOKING -> {
-                        val path = nameFor(doc, "bookings", "txt")
-                        put(path) { it.write(doc.text.toByteArray()) }
-                        paths[doc.id] = path
-                        files++
-                    }
-                    DocumentKind.CALENDAR_EVENT -> paths[doc.id] = "calendar.ics"
                 }
             }
             val events = inYear.filter { it.kind == DocumentKind.CALENDAR_EVENT }.map { it.text }.distinct()

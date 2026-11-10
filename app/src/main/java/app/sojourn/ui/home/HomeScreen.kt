@@ -81,7 +81,8 @@ import app.sojourn.data.db.Source
 import app.sojourn.data.geo.WorldMapData
 import app.sojourn.ui.FeieRoute
 import app.sojourn.ui.HistoryRoute
-import app.sojourn.ui.EvidenceRoute
+import app.sojourn.ui.EvidencePackRoute
+import app.sojourn.ui.SettingsSection
 import androidx.compose.material.icons.rounded.FolderZip
 import app.sojourn.ui.ImportRoute
 import app.sojourn.ui.RulesRoute
@@ -137,7 +138,7 @@ fun HomeContent(
                 title = { Text("Sojourn") },
                 subtitle = { Text(Format.long(state.today)) },
                 actions = {
-                    IconButton(onClick = { navigate(SettingsRoute) }) { Icon(Icons.Rounded.Settings, contentDescription = "Settings") }
+                    IconButton(onClick = { navigate(SettingsRoute()) }) { Icon(Icons.Rounded.Settings, contentDescription = "Settings") }
                 },
                 scrollBehavior = scroll,
             )
@@ -154,13 +155,13 @@ fun HomeContent(
             if (state.untracked > 0) item(key = "gaps") { UntrackedCard(state.untracked) { switchTab(TimelineRoute) } }
             item(key = "limits") {
                 SectionHeader("Limits & residency", Modifier.padding(top = 8.dp)) {
-                    TextButton(onClick = { navigate(RulesRoute) }) { Text("Manage") }
+                    TextButton(onClick = { navigate(RulesRoute()) }) { Text("Manage") }
                 }
             }
             if (state.statuses.isEmpty()) {
-                item(key = "no-rules") { NoRulesCard { navigate(RulesRoute) } }
+                item(key = "no-rules") { NoRulesCard { navigate(RulesRoute()) } }
             } else {
-                items(state.statuses, key = { "rule-${it.rule.id}" }) { RuleCard(it, onClick = { navigate(RulesRoute) }) }
+                items(state.statuses, key = { "rule-${it.rule.id}" }) { RuleCard(it, onClick = { navigate(RulesRoute()) }) }
             }
             item(key = "tools-header") { SectionHeader("Tools", Modifier.padding(top = 8.dp)) }
             item(key = "tools") { Tools(state.settings.usTaxpayer, navigate) }
@@ -450,9 +451,9 @@ private fun Tools(usTaxpayer: Boolean, navigate: (Any) -> Unit) {
     val tools = buildList {
         add(Tool("Import history", "From photos, GPX tracks or Google Timeline", Icons.Rounded.PhotoLibrary, ImportRoute))
         add(Tool("Travel history", "Every country and trip, for visa, residence and citizenship files", Icons.Rounded.Public, HistoryRoute))
-        add(Tool("Evidence pack", "A year's photos, passes and bookings, for a residence certificate", Icons.Rounded.FolderZip, EvidenceRoute))
+        add(Tool("Evidence pack", "A year's photos, passes and bookings, for a residence certificate", Icons.Rounded.FolderZip, EvidencePackRoute(java.time.LocalDate.now().year)))
         if (usTaxpayer) add(Tool("Form 2555", "FEIE physical presence test, pre-filled", Icons.Rounded.RequestQuote, FeieRoute))
-        add(Tool("Backup", "Export, restore, or back up to a folder", Icons.Rounded.Backup, SettingsRoute))
+        add(Tool("Backup", "Export, restore, or back up to a folder", Icons.Rounded.Backup, SettingsRoute(SettingsSection.DATA.name)))
     }
     val shapes: List<Shape> = listOf(
         MaterialShapes.Cookie6Sided.toShape(),

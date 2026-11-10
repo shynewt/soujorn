@@ -90,19 +90,63 @@ data class Flight(
     @ColumnInfo(defaultValue = "") val seat: String = "",
 )
 
-/** What a piece of evidence is. */
-enum class DocumentKind(val label: String) {
+/** How a kind of evidence is grouped in the evidence vault and the pack. */
+enum class EvidenceGroup(val label: String) {
+    TRAVEL("Travel"),
+    PRESENCE("Being there"),
+    HOME("Home"),
+    TIES("Work, tax and ties"),
+    OTHER("Other"),
+}
+
+/**
+ * How much a kind of evidence proves, after what Spain's TEAC (RG 4045/2020, 7199/2020) and
+ * courts accept: strong is third-party proof of where you were that day; medium is indirect or
+ * covers a period; weak only backs up other evidence; ties shows a home or centre of interests
+ * rather than days.
+ */
+enum class Strength(val label: String) { STRONG("Strong"), MEDIUM("Medium"), WEAK("Supporting"), TIES("Ties") }
+
+/**
+ * What a piece of evidence is. [period] kinds cover a span (a bill's billing period, a lease's
+ * term) rather than one day. Stored by name, so entries can be added but never renamed.
+ */
+enum class DocumentKind(val label: String, val group: EvidenceGroup, val strength: Strength, val period: Boolean = false) {
     /** A photo taken there that day, linked in the gallery, never copied. */
-    PHOTO("Photo"),
+    PHOTO("Photo", EvidenceGroup.PRESENCE, Strength.WEAK),
 
     /** A boarding pass or ticket file, kept in the app. */
-    BOARDING_PASS("Boarding pass"),
+    BOARDING_PASS("Boarding pass", EvidenceGroup.TRAVEL, Strength.STRONG),
 
     /** A calendar event, kept as it was. */
-    CALENDAR_EVENT("Calendar event"),
+    CALENDAR_EVENT("Calendar event", EvidenceGroup.TRAVEL, Strength.WEAK),
 
-    /** A booking email or other booking text. */
-    BOOKING("Booking"),
+    /** A booking confirmation's text. */
+    BOOKING("Booking", EvidenceGroup.TRAVEL, Strength.MEDIUM),
+
+    TICKET("Train, bus or ferry ticket", EvidenceGroup.TRAVEL, Strength.STRONG),
+    STAY("Hotel or stay invoice", EvidenceGroup.TRAVEL, Strength.STRONG, period = true),
+    CARD_STATEMENT("Card or bank statement", EvidenceGroup.PRESENCE, Strength.STRONG, period = true),
+    MEDICAL("Medical visit", EvidenceGroup.PRESENCE, Strength.STRONG),
+    APPOINTMENT("Notary, bank or official visit", EvidenceGroup.PRESENCE, Strength.STRONG),
+    RECEIPT("Receipt", EvidenceGroup.PRESENCE, Strength.WEAK),
+    LEASE("Rental contract or deed", EvidenceGroup.HOME, Strength.TIES, period = true),
+    UTILITY_BILL("Utility bill", EvidenceGroup.HOME, Strength.MEDIUM, period = true),
+    RESIDENCE_CERTIFICATE("Tax residence certificate", EvidenceGroup.TIES, Strength.STRONG, period = true),
+    TAX_RETURN("Tax return or tax record", EvidenceGroup.TIES, Strength.TIES, period = true),
+    WORK("Work: contract, payslip, company", EvidenceGroup.TIES, Strength.TIES, period = true),
+    REGISTRATION("Registration: padrón, residence card", EvidenceGroup.TIES, Strength.TIES, period = true),
+    FAMILY("Family: school, spouse", EvidenceGroup.TIES, Strength.TIES, period = true),
+    OTHER("Other", EvidenceGroup.OTHER, Strength.WEAK),
+    ;
+
+    companion object {
+        /** What can be added by hand, in the order offered. */
+        val ADDABLE = listOf(
+            BOARDING_PASS, TICKET, STAY, CARD_STATEMENT, MEDICAL, APPOINTMENT, RECEIPT,
+            LEASE, UTILITY_BILL, RESIDENCE_CERTIFICATE, TAX_RETURN, WORK, REGISTRATION, FAMILY, OTHER,
+        )
+    }
 }
 
 /**

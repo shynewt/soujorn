@@ -100,8 +100,10 @@ fun FlightEditorSheet(
     val context = LocalContext.current
     val today = LocalDate.now()
     var number by rememberSaveable { mutableStateOf(initial?.number?.let(Airlines::format).orEmpty()) }
-    var origin by rememberSaveable { mutableStateOf(initial?.origin) }
-    var destination by rememberSaveable { mutableStateOf(initial?.destination) }
+    // A new flight may come with its date (added from a day) and nothing else.
+    val isNew = initial == null || initial.id == 0L
+    var origin by rememberSaveable { mutableStateOf(initial?.origin?.ifBlank { null }) }
+    var destination by rememberSaveable { mutableStateOf(initial?.destination?.ifBlank { null }) }
     var date by rememberSaveable { mutableStateOf(initial?.departureDate) }
     var dayShift by rememberSaveable { mutableIntStateOf(initial?.let { ChronoUnit.DAYS.between(it.departureDate, it.arrivalDate).toInt() } ?: 0) }
     var departs by rememberSaveable { mutableStateOf(initial?.departureMinute) }
@@ -165,7 +167,7 @@ fun FlightEditorSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (initial == null) "Add a flight" else "Edit flight", style = MaterialTheme.typography.headlineSmallEmphasized, modifier = Modifier.weight(1f))
+                Text(if (isNew) "Add a flight" else "Edit flight", style = MaterialTheme.typography.headlineSmallEmphasized, modifier = Modifier.weight(1f))
                 FilledTonalButton(onClick = ::paste) {
                     Icon(Icons.Rounded.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -275,9 +277,9 @@ fun FlightEditorSheet(
 
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (initial != null) OutlinedButton(onClick = { onDelete(initial) }) { Text("Delete") }
+                if (initial != null && !isNew) OutlinedButton(onClick = { onDelete(initial) }) { Text("Delete") }
                 Spacer(Modifier.weight(1f))
-                Button(onClick = { draft?.let(onSave) }, enabled = draft != null) { Text(if (initial == null) "Add flight" else "Save") }
+                Button(onClick = { draft?.let(onSave) }, enabled = draft != null) { Text(if (isNew) "Add flight" else "Save") }
             }
         }
     }
