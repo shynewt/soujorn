@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sojourn</string>
+    <string name="import_label">Import to Sojourn</string>
+    <string name="import_trip_label">Add trip to Sojourn</string>
+    <string name="widget_name">Where I am</string>
+    <string name="widget_description">Your current country and days spent there this year</string>
+</resources>

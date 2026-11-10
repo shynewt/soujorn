@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <include domain="database" path="sojourn.db" />
+    <include domain="file" path="datastore/settings.preferences_pb" />
+    <include domain="file" path="evidence/" />
+</full-backup-content>

@@ -1,0 +1,15 @@
+{
+  "rules": {
+    "kotlin": {
+      "disable": [
+        "kotlin-no-var",
+        "kotlin-prefer-data-class"
+      ]
+    },
+    "kotlin-no-nullable-boolean": {
+      "ignorePaths": [
+        "app/src/main/java/app/sojourn/domain/Residency.kt"
+      ]
+    }
+  }
+}

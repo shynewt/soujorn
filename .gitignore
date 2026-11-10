@@ -1,0 +1,22 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.hprof
+.kotlin
+.claude
+.*-cache
+
+# The release key and its password never enter the repository; debug.keystore is public on purpose.
+/signing/*.jks
+/signing/*.keystore
+/signing/*.password
+*.idsig
