@@ -87,7 +87,6 @@ import androidx.compose.material.icons.rounded.FolderZip
 import app.sojourn.ui.ImportRoute
 import app.sojourn.ui.RulesRoute
 import app.sojourn.ui.SettingsRoute
-import app.sojourn.ui.TimelineRoute
 import app.sojourn.ui.appViewModel
 import app.sojourn.ui.components.BarSegment
 import app.sojourn.ui.components.CountryPickerSheet
@@ -103,7 +102,30 @@ import app.sojourn.ui.components.WorldMap
 import app.sojourn.ui.theme.CountryPalette
 
 @Composable
-fun HomeScreen(navigate: (Any) -> Unit, switchTab: (Any) -> Unit) {
+fun HomeScreen() {
+    val actions = app.sojourn.ui.LocalAppActions.current
+    HomeScreen(
+        navigate = { route ->
+            when (route) {
+                is SettingsRoute -> actions.settings(route.section?.let(SettingsSection::valueOf))
+                is RulesRoute -> actions.rules()
+                is EvidencePackRoute -> actions.evidencePack(route.year)
+                ImportRoute -> actions.import()
+                HistoryRoute -> actions.history()
+                FeieRoute -> actions.feie()
+            }
+        },
+        switchTab = { route ->
+            when (route) {
+                PlanRoute -> actions.tab(app.sojourn.ui.AppTab.PLAN)
+                else -> actions.calendar(list = true)
+            }
+        },
+    )
+}
+
+@Composable
+private fun HomeScreen(navigate: (Any) -> Unit, switchTab: (Any) -> Unit) {
     val vm = appViewModel { HomeViewModel(it) }
     val state by vm.state.collectAsStateWithLifecycle()
     val map by vm.map.collectAsStateWithLifecycle()
@@ -152,7 +174,7 @@ fun HomeContent(
             state.nextFlight?.let { flight -> item(key = "flight") { NextFlightCard(flight, state.today) { switchTab(PlanRoute) } } }
             if (state.years.isNotEmpty()) item(key = "years") { YearSwitcher(state.years, state.year, onYear) }
             item(key = "summary") { SummaryCard(state, map) }
-            if (state.untracked > 0) item(key = "gaps") { UntrackedCard(state.untracked) { switchTab(TimelineRoute) } }
+            if (state.untracked > 0) item(key = "gaps") { UntrackedCard(state.untracked) { switchTab(Unit) } }
             item(key = "limits") {
                 SectionHeader("Limits & residency", Modifier.padding(top = 8.dp)) {
                     TextButton(onClick = { navigate(RulesRoute()) }) { Text("Manage") }

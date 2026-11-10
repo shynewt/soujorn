@@ -102,7 +102,13 @@ class SettingsViewModel(val container: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun SettingsScreen(back: () -> Unit, openRules: () -> Unit) {
+fun SettingsScreen(section: app.sojourn.ui.SettingsSection?, back: () -> Unit) {
+    val actions = app.sojourn.ui.LocalAppActions.current
+    SettingsScreen(back = back, openRules = { actions.rules() })
+}
+
+@Composable
+private fun SettingsScreen(back: () -> Unit, openRules: () -> Unit) {
     val vm = appViewModel { SettingsViewModel(it) }
     val settings by vm.settings.collectAsStateWithLifecycle()
     val current = settings ?: return

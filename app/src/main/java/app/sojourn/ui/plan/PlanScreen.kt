@@ -75,7 +75,13 @@ import app.sojourn.ui.theme.CountryPalette
 import java.time.temporal.ChronoUnit
 
 @Composable
-fun PlanScreen(openRules: () -> Unit) {
+fun PlanScreen() {
+    val actions = app.sojourn.ui.LocalAppActions.current
+    PlanScreen(openRules = { actions.rules() })
+}
+
+@Composable
+private fun PlanScreen(openRules: () -> Unit) {
     val vm = appViewModel { PlanViewModel(it) }
     val state by vm.state.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<Plan?>(null) }

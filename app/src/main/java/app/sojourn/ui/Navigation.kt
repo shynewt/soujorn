@@ -28,7 +28,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.remember
 import app.sojourn.data.db.Flight
 import app.sojourn.data.db.Plan
+import app.sojourn.ui.evidence.EvidencePackScreen
 import app.sojourn.ui.evidence.EvidenceTab
+import androidx.navigation.toRoute
 import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Text
@@ -68,7 +70,6 @@ import app.sojourn.ui.reports.HistoryScreen
 import app.sojourn.ui.rules.RulesScreen
 import app.sojourn.ui.settings.SettingsScreen
 import app.sojourn.ui.theme.SojournTheme
-import app.sojourn.ui.timeline.TimelineScreen
 import kotlin.reflect.KClass
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
@@ -80,9 +81,6 @@ import kotlinx.serialization.Serializable
 @Serializable data object PlanRoute
 
 @Serializable data object EvidenceTabRoute
-
-/** The list of stays, until it joins the Calendar tab. */
-@Serializable data object TimelineRoute
 
 /** Settings, opened at [section] (a [SettingsSection] name) when given. */
 @Serializable data class SettingsRoute(val section: String? = null)
@@ -154,8 +152,7 @@ private fun MainScaffold() {
             override fun tab(tab: AppTab) = nav.switchTab(Tab.entries.first { it.app == tab }.route)
             override fun calendar(day: java.time.LocalDate?, list: Boolean) {
                 shell.showCalendar(CalendarRequest(day, list))
-                // The list of stays joins the Calendar tab in the Calendar step; it opens on its own until then.
-                if (list) nav.navigate(TimelineRoute) else nav.switchTab(CalendarRoute)
+                nav.switchTab(CalendarRoute)
             }
             override fun settings(section: SettingsSection?) = nav.navigate(SettingsRoute(section?.name))
             override fun rules(ruleId: Long?) = nav.navigate(RulesRoute(ruleId ?: -1))
@@ -200,21 +197,18 @@ private fun MainScaffold() {
                 popEnterTransition = { fadeIn(tween(210, delayMillis = 90)) + scaleIn(tween(210, delayMillis = 90), initialScale = 0.92f) },
                 popExitTransition = { fadeOut(tween(90)) },
             ) {
-                composable<HomeRoute> {
-                    HomeScreen(
-                        navigate = { route -> nav.navigate(route) },
-                        switchTab = { route -> if (route == TimelineRoute) actions.calendar(list = true) else nav.switchTab(route) },
-                    )
-                }
+                composable<HomeRoute> { HomeScreen() }
                 composable<CalendarRoute> { CalendarScreen() }
-                composable<PlanRoute> { PlanScreen(openRules = { actions.rules() }) }
+                composable<PlanRoute> { PlanScreen() }
                 composable<EvidenceTabRoute> { EvidenceTab() }
-                pushed<TimelineRoute> { TimelineScreen() }
-                pushed<SettingsRoute> { SettingsScreen(back = { nav.popBackStack() }, openRules = { actions.rules() }) }
-                pushed<RulesRoute> { RulesScreen(back = { nav.popBackStack() }) }
+                pushed<SettingsRoute> { entry ->
+                    val route = entry.toRoute<SettingsRoute>()
+                    SettingsScreen(section = route.section?.let { runCatching { SettingsSection.valueOf(it) }.getOrNull() }, back = { nav.popBackStack() })
+                }
+                pushed<RulesRoute> { entry -> RulesScreen(ruleId = entry.toRoute<RulesRoute>().ruleId.takeIf { it >= 0 }, back = { nav.popBackStack() }) }
                 pushed<FeieRoute> { FeieScreen(back = { nav.popBackStack() }) }
                 pushed<HistoryRoute> { HistoryScreen(back = { nav.popBackStack() }) }
-                pushed<EvidencePackRoute> { app.sojourn.ui.reports.EvidenceScreen(back = { nav.popBackStack() }) }
+                pushed<EvidencePackRoute> { entry -> EvidencePackScreen(year = entry.toRoute<EvidencePackRoute>().year, back = { nav.popBackStack() }) }
                 pushed<ImportRoute> { ImportScreen(back = { nav.popBackStack() }) }
             }
         }
@@ -226,13 +220,13 @@ private fun MainScaffold() {
 val LocalCalendarRequests = staticCompositionLocalOf<ShellViewModel?> { null }
 
 /** Screens stacked on top of the tabs slide in from the side. */
-private inline fun <reified T : Any> androidx.navigation.NavGraphBuilder.pushed(noinline content: @Composable () -> Unit) {
+private inline fun <reified T : Any> androidx.navigation.NavGraphBuilder.pushed(noinline content: @Composable (androidx.navigation.NavBackStackEntry) -> Unit) {
     composable<T>(
         enterTransition = { slideInHorizontally(tween(320)) { it / 5 } + fadeIn(tween(320)) },
         exitTransition = { fadeOut(tween(160)) },
         popEnterTransition = { fadeIn(tween(260)) },
         popExitTransition = { slideOutHorizontally(tween(260)) { it / 5 } + fadeOut(tween(260)) },
-    ) { content() }
+    ) { content(it) }
 }
 
 private fun NavHostController.switchTab(route: Any) {

@@ -95,7 +95,12 @@ class RulesViewModel(container: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun RulesScreen(back: () -> Unit) {
+fun RulesScreen(ruleId: Long?, back: () -> Unit) {
+    RulesScreen(back)
+}
+
+@Composable
+private fun RulesScreen(back: () -> Unit) {
     val vm = appViewModel { RulesViewModel(it) }
     val state by vm.state.collectAsStateWithLifecycle()
     var choosing by remember { mutableStateOf(false) }
