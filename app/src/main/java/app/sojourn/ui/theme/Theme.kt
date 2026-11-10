@@ -121,6 +121,9 @@ object CountryPalette {
     fun assign(ranked: List<String>): Map<String, Color> =
         ranked.mapIndexed { index, code -> code to colors[index % colors.size] }.toMap()
 
+    /** A steady colour for a country not ranked yet (only planned, say), the same every time. */
+    fun fallback(code: String): Color = colors[Math.floorMod(code.hashCode(), colors.size)]
+
     val other: Color
         @Composable @ReadOnlyComposable
         get() = MaterialTheme.colorScheme.outline

@@ -224,7 +224,8 @@ fun DayDetails(
             }
         }
 
-        DayEvidence(documents.filter { it.day == date }, actions::choosePhoto, actions::deleteDocument)
+        // A period document (a lease, a bill) shows on every day it covers.
+        DayEvidence(documents.filter { date >= it.day && date <= (it.until ?: it.day) }, actions::choosePhoto, actions::deleteDocument)
 
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {

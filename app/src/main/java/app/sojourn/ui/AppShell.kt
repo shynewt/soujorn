@@ -1,6 +1,5 @@
 package app.sojourn.ui
 
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -98,10 +97,10 @@ object NoActions : AppActions {
 /** Every country's colour, the same on every screen: ranked by all the days spent there. */
 val LocalCountryColors = staticCompositionLocalOf<Map<String, Color>> { emptyMap() }
 
-/** A country's colour, or the colour for "other" when it has none. */
+/** A country's colour: its rank's, or a steady one of its own when it has no days yet. */
 @Composable
 @ReadOnlyComposable
-fun countryColor(code: String): Color = LocalCountryColors.current[code] ?: MaterialTheme.colorScheme.outline
+fun countryColor(code: String): Color = LocalCountryColors.current[code] ?: CountryPalette.fallback(code)
 
 /** The editors open over the whole app, and what they need. */
 sealed interface Editor {
