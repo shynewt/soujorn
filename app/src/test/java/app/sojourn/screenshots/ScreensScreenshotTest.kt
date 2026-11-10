@@ -147,7 +147,9 @@ class ScreensScreenshotTest {
     }
 
     private fun plan(name: String, dark: Boolean) = compose.screenshot(name, dark) {
-        PlanContent(planState(Sample.book, Sample.plans, Sample.statuses, Sample.today.year), {}, {}, {}, {}, {})
+        androidx.compose.runtime.CompositionLocalProvider(app.sojourn.ui.LocalCountryColors provides app.sojourn.ui.theme.CountryPalette.assign(listOf("PT", "US", "MX", "ME", "ES", "GB", "FR", "TH", "VN"))) {
+            PlanContent(planState(Sample.book, Sample.plans, Sample.statuses, Sample.today.year), {})
+        }
     }
 
     @Test fun plan() = plan("plan", dark = false)
