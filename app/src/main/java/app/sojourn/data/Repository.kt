@@ -1,5 +1,6 @@
 package app.sojourn.data
 
+import app.sojourn.data.travel.FoundTrip
 import androidx.room.withTransaction
 import app.sojourn.data.BackupCodec.flightEntities
 import app.sojourn.data.BackupCodec.planEntities
@@ -16,6 +17,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import app.sojourn.data.flights.FlightMatch
+import app.sojourn.data.flights.Airlines
 import app.sojourn.data.db.Plan
 import app.sojourn.data.db.Presence
 import app.sojourn.data.db.Rule
@@ -76,13 +78,18 @@ class Repository(
         }
     }.distinctUntilChanged()
 
+    /** Flights with a boarding pass kept, whose days in between count as proven. */
+    private val passes: Flow<Set<Long>> = db.documents().observeAll()
+        .map { docs -> docs.filter { it.kind == DocumentKind.BOARDING_PASS }.mapNotNullTo(HashSet()) { it.flightId } }
+        .distinctUntilChanged()
+
     val book: Flow<DayBook> = combine(
-        db.presence().observeAll(),
+        combine(db.presence().observeAll(), passes, ::Pair),
         plans,
         flights,
         settings.map { CountingOptions(it.fillGaps, it.policies) }.distinctUntilChanged(),
         today,
-    ) { presence, plans, flights, options, today -> DayBook.build(presence, plans, options, today, flights) }
+    ) { (presence, passes), plans, flights, options, today -> DayBook.build(presence, plans, options, today, flights, passes) }
         .flowOn(Dispatchers.Default)
         .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 
@@ -110,9 +117,26 @@ class Repository(
         if (currentCoroutineContext()[RecordingKey] != null) return block()
         val before = tables()
         val result = withContext(Recording()) { block() }
+        relinkEvidence()
         val change = Change.between(changeLog.nextId(), System.currentTimeMillis(), label, before, tables())
         if (!change.isEmpty) changeLog.add(change)
         return result
+    }
+
+    /**
+     * Points evidence at the flight it backs up again after flights got new ids (a restore, an
+     * undo, duplicates merged), by its route and day; evidence whose flight is gone names none.
+     */
+    private suspend fun relinkEvidence() {
+        val flights = db.flights().all()
+        val ids = flights.mapTo(HashSet()) { it.id }
+        for (doc in db.documents().flightDocuments()) {
+            if (doc.flightId != null && doc.flightId in ids) continue
+            val match = flights.firstOrNull { f ->
+                "${f.origin}→${f.destination}" in doc.title && (doc.day == f.departureDate || doc.day == f.arrivalDate)
+            }?.id
+            if (match != doc.flightId) db.documents().upsert(doc.copy(flightId = match))
+        }
     }
 
     /**
@@ -155,7 +179,7 @@ class Repository(
         onDaysChanged()
     }
 
-    suspend fun addToDay(day: LocalDate, country: String) {
+    suspend fun addToDay(day: LocalDate, country: String) = recordChange("Added ${Countries.name(country)} to ${Change.range(day, day)}") {
         db.presence().insertMissing(listOf(Presence(day, country, Source.MANUAL)))
         onDaysChanged()
     }
@@ -294,7 +318,7 @@ class Repository(
      * Puts the countries of a recorded day in [path] order (a country twice when the day left
      * it and came back), by giving the day's rows times spread across it. Flights keep their own.
      */
-    suspend fun reorderDay(date: LocalDate, path: List<String>) {
+    suspend fun reorderDay(date: LocalDate, path: List<String>) = recordChange("Reordered the countries on ${Change.range(date, date)}") {
         val start = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val step = 86_400_000L / (path.size + 1)
         db.withTransaction {
@@ -339,7 +363,7 @@ class Repository(
                 db.documents().upsert(existing.copy(candidates = choices.joinToString("\n")))
                 return false
             }
-        } else if (document.file == null && db.documents().find(document.day, document.country, document.kind).any { it.title == document.title && it.text == document.text }) {
+        } else if (document.file == null && db.documents().find(document.day, document.country, document.kind).any { it.title == document.title && it.text == document.text && it.note == document.note }) {
             return false
         }
         db.documents().upsert(document)
@@ -358,6 +382,17 @@ class Repository(
         db.documents().delete(document.id)
         // One boarding pass backs both its days; its file goes with the last of them.
         document.file?.takeIf { db.documents().usingFile(it) == 0 }?.let { name -> evidenceDir?.let { File(it, name).delete() } }
+    }
+
+    /** Saves changes to a kept document: its title, note, dates or country. Its file stays as it is. */
+    /** [document] and its copies on other days: one file kept for a flight's two days, say. */
+    suspend fun copiesOf(document: Document): List<Document> {
+        val file = document.file ?: return listOf(document)
+        return db.documents().withFile(file).filter { it.kind == document.kind }.ifEmpty { listOf(document) }
+    }
+
+    suspend fun updateDocument(document: Document) {
+        db.documents().upsert(document)
     }
 
     suspend fun documentsBetween(from: LocalDate, to: LocalDate): List<Document> = db.documents().between(from, to)
@@ -401,7 +436,13 @@ class Repository(
     }
 
     suspend fun saveFlight(flight: Flight) = recordChange("Saved flight ${flight.number.ifBlank { "" }} ${flight.origin}→${flight.destination}".replace("  ", " ")) {
-        db.flights().upsert(flight)
+        // A boarding pass attached while the editor was open filled these in; a form opened
+        // before that has them blank and mustn't wipe them.
+        val saved = if (flight.id != 0L) db.flights().all().firstOrNull { it.id == flight.id } else null
+        db.flights().upsert(
+            if (saved == null) flight
+            else flight.copy(reference = flight.reference.ifBlank { saved.reference }, passenger = flight.passenger.ifBlank { saved.passenger }, seat = flight.seat.ifBlank { saved.seat }),
+        )
         onDaysChanged()
     }
 
@@ -419,9 +460,27 @@ class Repository(
         db.withTransaction {
             val known = db.flights().all().toMutableList()
             for (flight in flights) {
-                if (known.any { FlightMatch.same(it, flight) }) continue
-                db.flights().upsert(flight)
-                known += flight
+                // A flight already saved only gains what it didn't know (booking reference,
+                // passenger, seat, number, times); its airports and note stay as they are.
+                val existing = known.indexOfFirst { FlightMatch.same(it, flight) }
+                if (existing >= 0) {
+                    val old = known[existing]
+                    val filled = old.copy(
+                        number = old.number.ifBlank { flight.number },
+                        departureMinute = old.departureMinute ?: flight.departureMinute,
+                        arrivalMinute = old.arrivalMinute ?: flight.arrivalMinute,
+                        reference = old.reference.ifBlank { flight.reference },
+                        passenger = old.passenger.ifBlank { flight.passenger },
+                        seat = old.seat.ifBlank { flight.seat },
+                    )
+                    if (filled != old) {
+                        db.flights().upsert(filled)
+                        known[existing] = filled
+                    }
+                    continue
+                }
+                val id = db.flights().upsert(flight.copy(id = 0))
+                known += flight.copy(id = id)
                 added++
             }
             removed = mergeDuplicateFlights()
@@ -429,6 +488,23 @@ class Repository(
         onDaysChanged()
         return FlightImport(added, flights.size - added, removed)
     }
+
+    /** Fills in what a boarding pass or booking tells about a saved flight and it didn't know. */
+    suspend fun enrichFlight(flight: Flight, found: FoundTrip) {
+        val current = db.flights().all().firstOrNull { it.id == flight.id } ?: return
+        val updated = current.copy(
+            number = current.number.ifBlank { found.number.filter { it.isLetterOrDigit() } },
+            departureMinute = current.departureMinute ?: found.departureMinute,
+            arrivalMinute = current.arrivalMinute ?: found.arrivalMinute,
+            reference = current.reference.ifBlank { found.reference.orEmpty() },
+            passenger = current.passenger.ifBlank { found.passenger.orEmpty() },
+            seat = current.seat.ifBlank { found.seat.orEmpty() },
+        )
+        if (updated != current) recordChange("Filled in flight ${Airlines.format(updated.number)}".trim()) { db.flights().upsert(updated) }
+    }
+
+    /** The saved flight [flight] is the same as, if any. */
+    suspend fun savedFlight(flight: Flight): Flight? = db.flights().all().firstOrNull { FlightMatch.same(it, flight) }
 
     /** Removes saved flights that are the same flight twice, keeping what each copy knew. */
     suspend fun removeDuplicateFlights(): Int = recordChange("Merged duplicate flights") {

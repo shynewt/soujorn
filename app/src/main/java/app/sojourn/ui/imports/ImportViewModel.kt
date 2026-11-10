@@ -9,7 +9,7 @@ import app.sojourn.data.db.DocumentKind
 import app.sojourn.data.db.Presence
 import app.sojourn.data.db.Source
 import app.sojourn.data.RangeEdit
-import app.sojourn.data.travel.TravelImporter
+import app.sojourn.data.travel.PassengerMatch
 import app.sojourn.data.travel.RawKind
 import app.sojourn.data.travel.TripKind
 import app.sojourn.data.travel.TripScan
@@ -74,13 +74,26 @@ sealed interface ImportPhase {
         val duplicatesRemoved: Int = 0,
     ) : ImportPhase
 
-    data class Done(val added: Int, val what: String = "days", val skipped: Int = 0, val duplicatesRemoved: Int = 0, val backedUp: Int = 0, val evidence: Int = 0) : ImportPhase
+    /**
+     * What an import did, to say plainly: [added] days or trips ([trips] tells which), [backedUp]
+     * days already recorded that it now supports, [evidence] documents or photos kept, [skipped]
+     * flights already saved, and [first], the earliest day it touched, to open the Calendar at.
+     */
+    data class Done(
+        val added: Int,
+        val trips: Boolean = false,
+        val skipped: Int = 0,
+        val duplicatesRemoved: Int = 0,
+        val backedUp: Int = 0,
+        val evidence: Int = 0,
+        val first: LocalDate? = null,
+    ) : ImportPhase
 }
 
 class ImportViewModel(private val container: AppContainer) : ViewModel() {
     private val photos = PhotoScanner(container.context) { container.locator }
     private val files = LocationFileImporter(container.context) { container.locator }
-    private val travel = TravelImporter(container.context) { container.airports }
+    private val travel = container.travel
     private val _phase = MutableStateFlow<ImportPhase>(ImportPhase.Idle())
     val phase: StateFlow<ImportPhase> = _phase
     private var job: Job? = null
@@ -244,12 +257,17 @@ class ImportViewModel(private val container: AppContainer) : ViewModel() {
         }
         // Flights are checked against the saved ones once more as they're written, so an
         // import run twice, or a flight already entered by hand, never ends up there twice.
-        val result = repository.importFlights(flights)
+        // Flights already saved are passed too: they only gain what these copies add (booking
+        // reference, passenger, seat), never a second copy.
+        // Not other passengers' passes: their name and seat aren't the user's.
+        val known = trips.items.filter { it.duplicate && it.usable && it.passengerMatch != PassengerMatch.DIFFERENT }.mapNotNull { it.trip.asFlight(it.fromCountry, it.toCountry) }
+        val result = repository.importFlights(flights + known).let { it.copy(skipped = it.skipped - known.size) }
         // Keep what each trip was found in as evidence, for the trips added and for those
         // already there: a calendar event, a booking's text, a boarding pass file.
         val kept = keepEvidence(chosen + trips.items.filter { it.duplicate && it.usable })
         val added = chosen.size - flights.size + result.added
-        _phase.value = ImportPhase.Done(added, if (added == 1) "trip" else "trips", skipped = result.skipped, duplicatesRemoved = result.duplicatesRemoved, evidence = kept)
+        val first = (chosen + trips.items.filter { it.duplicate && it.usable }).minOfOrNull { it.trip.departure }
+        _phase.value = ImportPhase.Done(added, trips = true, skipped = result.skipped, duplicatesRemoved = result.duplicatesRemoved, evidence = kept, first = first)
     }
 
     /**
@@ -264,8 +282,9 @@ class ImportViewModel(private val container: AppContainer) : ViewModel() {
                 item.fromCountry?.takeIf { item.trip.kind != TripKind.STAY }?.let { item.trip.departure to it },
                 item.toCountry?.let { item.trip.arrival to it },
             ).distinct()
+            val flightId = item.trip.asFlight(item.fromCountry, item.toCountry)?.let { container.repository.savedFlight(it)?.id }
             for (original in (listOf(item.trip) + item.copies).distinctBy { listOf(it.rawKind, it.file ?: it.raw) }) {
-                kept += container.keeper.keep(item.trip, original, places, copies)
+                kept += container.keeper.keep(item.trip, original, places, copies, flightId)
             }
         }
         return kept
@@ -303,6 +322,7 @@ class ImportViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val repository = container.repository
             val (added, backed) = repository.addFound(rows, onlyEmpty, label)
+            var linked = 0
             if (review.source == Source.PHOTO && rows.isNotEmpty()) {
                 val recorded = repository.recordedPairs(rows.minOf { it.day }, rows.maxOf { it.day })
                 stays.forEach { stay ->
@@ -310,7 +330,7 @@ class ImportViewModel(private val container: AppContainer) : ViewModel() {
                         if ((day to stay.country) !in recorded || links.isEmpty()) return@forEach
                         // The middle photo of the day is the default; the others can be chosen instead.
                         val chosen = links[links.size / 2]
-                        repository.addDocument(
+                        val new = repository.addDocument(
                             Document(
                                 day = day,
                                 country = stay.country,
@@ -320,10 +340,11 @@ class ImportViewModel(private val container: AppContainer) : ViewModel() {
                                 candidates = links.filter { it != chosen }.joinToString("\n"),
                             ),
                         )
+                        if (new) linked++
                     }
                 }
             }
-            _phase.value = ImportPhase.Done(added, backedUp = backed)
+            _phase.value = ImportPhase.Done(added, backedUp = backed, evidence = linked, first = rows.minOfOrNull { it.day })
         }
     }
 

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Flight
@@ -32,6 +34,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -49,6 +52,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.sojourn.data.Countries
@@ -278,7 +282,7 @@ private fun numberColor(day: Day?, colors: Map<String, Color>): Color {
     return if (fill.luminance() > 0.45f) Color.Black else Color.White
 }
 
-/** One month as a card of square day tiles, for the Grid and Compact views. */
+/** One month as a card of square day tiles, for the year view. */
 @Composable
 fun MonthCard(
     month: YearMonth,
@@ -287,37 +291,28 @@ fun MonthCard(
     today: LocalDate,
     colors: Map<String, Color>,
     selection: Selection?,
-    compact: Boolean,
     hits: DayHitTest,
     callbacks: DayGestureCallbacks,
 ) {
     val locale = LocalConfiguration.current.locales[0]
     val offset = (month.atDay(1).dayOfWeek.value - firstDay.value + 7) % 7
-    val gap = if (compact) 2.dp else 3.dp
+    val gap = 3.dp
     val first = book?.firstRecorded
-    Surface(shape = RoundedCornerShape(if (compact) 16.dp else 20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.padding(if (compact) 8.dp else 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = if (compact) 4.dp else 8.dp)) {
-                Text(
-                    month.month.getDisplayName(if (compact) TextStyle.SHORT else TextStyle.FULL, locale),
-                    style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            if (!compact) {
-                Row(Modifier.clearAndSetSemantics { }) {
-                    (0 until 7).forEach { i ->
-                        Text(
-                            firstDay.plus(i.toLong()).getDisplayName(TextStyle.NARROW, locale),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.padding(12.dp)) {
+            Text(month.month.getDisplayName(TextStyle.FULL, locale), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 8.dp))
+            Row(Modifier.clearAndSetSemantics { }) {
+                (0 until 7).forEach { i ->
+                    Text(
+                        firstDay.plus(i.toLong()).getDisplayName(TextStyle.NARROW, locale),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                Spacer(Modifier.height(2.dp))
             }
+            Spacer(Modifier.height(2.dp))
             val weeks = (offset + month.lengthOfMonth() + 6) / 7
             for (week in 0 until weeks) {
                 Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.padding(bottom = gap)) {
@@ -331,31 +326,35 @@ fun MonthCard(
                         val day = book?.get(date)
                         val untracked = day == null && date <= today && first != null && date >= first
                         val selected = selection.has(date)
-                        val shape = RoundedCornerShape(if (compact) 3.dp else 6.dp)
-                        Box(
-                            Modifier
-                                .weight(1f)
-                                .aspectRatio(1f)
-                                .clip(shape)
-                                .dayTile(day, colors, untracked, rows = false)
-                                .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
-                                .then(if (date == today) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, shape) else Modifier)
-                                .dayCell(date, hits, callbacks, describeDay(date, day, book, today)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "$n",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = if (compact) 8.sp else 11.sp,
-                                    lineHeight = if (compact) 8.sp else 11.sp,
-                                    platformStyle = PlatformTextStyle(includeFontPadding = false),
-                                    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
-                                ),
-                                maxLines = 1,
-                                softWrap = false,
-                                fontWeight = if (date == today) FontWeight.Bold else FontWeight.Normal,
-                                color = numberColor(day, colors),
-                            )
+                        val shape = RoundedCornerShape(6.dp)
+                        val flight = book?.flightsOn(date)?.isNotEmpty() == true
+                        // The plane sits on the tile's corner, over the gap, so it never covers the number.
+                        Box(Modifier.weight(1f).aspectRatio(1f).then(if (flight) Modifier.zIndex(1f) else Modifier)) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .clip(shape)
+                                    .dayTile(day, colors, untracked, rows = false)
+                                    .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
+                                    .then(if (date == today) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, shape) else Modifier)
+                                    .dayCell(date, hits, callbacks, describeDay(date, day, book, today)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "$n",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 11.sp,
+                                        lineHeight = 11.sp,
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                        lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    fontWeight = if (date == today) FontWeight.Bold else FontWeight.Normal,
+                                    color = numberColor(day, colors),
+                                )
+                            }
+                            if (flight) FlightMark(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp))
                         }
                     }
                 }
@@ -422,12 +421,29 @@ fun YearRows(
                                     .then(if (selection.has(date)) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
                                     .then(if (date == today) Modifier.border(1.5.dp, MaterialTheme.colorScheme.onSurface, shape) else Modifier)
                                     .dayCell(date, hits, callbacks, describeDay(date, day, book, today)),
-                            )
+                                contentAlignment = Alignment.TopCenter,
+                            ) {
+                                if (book?.flightsOn(date)?.isNotEmpty() == true) FlightMark(Modifier.padding(top = 1.dp))
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * A flight day in the year view: a tiny plane on a disc of the page's colour, so it reads the
+ * same on any country's colour, light or dark. The month view draws the plane without the disc.
+ */
+@Composable
+fun FlightMark(modifier: Modifier = Modifier, size: Dp = 12.dp) {
+    Box(
+        modifier.size(size).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerLow).clearAndSetSemantics { },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.Flight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(size - 2.dp).rotate(45f))
     }
 }
 

@@ -65,6 +65,8 @@ import app.sojourn.domain.Goal
 import app.sojourn.domain.ResidencyParams
 import app.sojourn.domain.ResidencyTest
 import app.sojourn.domain.TestKind
+import app.sojourn.domain.RuleStatus
+import app.sojourn.ui.components.RuleCard
 import app.sojourn.ui.components.ChoiceGroup
 import app.sojourn.ui.components.CountryPickerSheet
 import app.sojourn.ui.components.FlagBadge
@@ -72,10 +74,15 @@ import app.sojourn.ui.components.segmentedColors
 import java.time.Month
 import java.time.format.TextStyle
 
+/**
+ * Edits a rule. For a saved rule, [status] shows where it stands first, in full, so opening a
+ * rule from its card explains the figure before offering to change how it's worked out.
+ */
 @Composable
 fun RuleEditorSheet(
     initial: Rule,
     recents: List<String>,
+    status: RuleStatus? = null,
     onDismiss: () -> Unit,
     onSave: (Rule) -> Unit,
     onDelete: (Rule) -> Unit,
@@ -98,6 +105,7 @@ fun RuleEditorSheet(
     var params by remember { mutableStateOf(ResidencyParams.decode(initial.params) ?: if (residency) ResidencyParams.fromCatalogue(initial.countries, Goal.AVOID) else null) }
     var picking by remember { mutableStateOf(false) }
     var choosingCounting by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     val dayCount = days.toIntOrNull()?.takeIf { it > 0 }
     val windowCount = windowDays.toIntOrNull()?.takeIf { it > 0 }
@@ -110,6 +118,7 @@ fun RuleEditorSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(if (isNew) "New rule" else "Edit rule", style = MaterialTheme.typography.headlineSmallEmphasized)
+            status?.let { RuleCard(it, expanded = true) }
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
@@ -225,7 +234,7 @@ fun RuleEditorSheet(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (!isNew) OutlinedButton(onClick = { onDelete(initial) }) { Text("Delete") }
+                if (!isNew) OutlinedButton(onClick = { confirmDelete = true }) { Text("Delete") }
                 Spacer(Modifier.weight(1f))
                 Button(
                     enabled = valid,
@@ -260,6 +269,20 @@ fun RuleEditorSheet(
                 ) { Text("Save") }
             }
         }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete this rule?") },
+            text = { Text("“${initial.name}” stops being counted. Your days stay as they are. To keep it without counting, turn off Active instead.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    onDelete(initial)
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
     }
     if (picking) {
         CountryPickerSheet(
@@ -385,7 +408,7 @@ private fun ResidencyEditor(params: ResidencyParams, yearStart: Int, onYearStart
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Do you have a tax residence certificate from another country for this year?", style = MaterialTheme.typography.bodyMedium)
+                Text("Can you prove tax residence in another country (usually its certificate)?", style = MaterialTheme.typography.bodyMedium)
                 ChoiceGroup(
                     listOf(true to "Yes", false to "No", null to "Not sure"),
                     sporadic.certificate,

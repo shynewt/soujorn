@@ -78,11 +78,22 @@ data class Day(
     val origins: Map<String, PlanOrigin> = emptyMap(),
     /** The sources behind each recorded country of the day (flights included). */
     val sources: Map<String, Set<Source>> = emptyMap(),
+    /**
+     * Countries the day is proven in by kept boarding passes on both sides: the flight in and
+     * the flight out of that country. Three days in Poland between two passes are documented
+     * whatever else recorded them.
+     */
+    val between: Set<String> = emptySet(),
 ) {
     val countries: List<String> = path.distinct()
 
     /** How well [country] is backed up on this day. */
-    fun evidenceOf(country: String): Evidence = when (kind) {
+    fun evidenceOf(country: String): Evidence = when {
+        kind != DayKind.PLANNED && country in between -> Evidence.DOCUMENTED
+        else -> plainEvidenceOf(country)
+    }
+
+    private fun plainEvidenceOf(country: String): Evidence = when (kind) {
         DayKind.INFERRED -> Evidence.ASSUMED
         DayKind.PLANNED -> Evidence.ASSUMED
         DayKind.RECORDED -> sources[country].orEmpty().map(Evidence::of).minOrNull() ?: Evidence.MANUAL
@@ -342,6 +353,8 @@ class DayBook private constructor(
             options: CountingOptions,
             today: LocalDate,
             flights: List<Flight> = emptyList(),
+            /** Flights with a boarding pass kept: the days between two of them are proven. */
+            passes: Set<Long> = emptySet(),
         ): DayBook {
             val sortedFlights = flights.sortedWith(compareBy<Flight> { it.departureDate }.thenBy { it.departureMinute ?: 0 })
             val days = TreeMap<LocalDate, Day>()
@@ -426,7 +439,29 @@ class DayBook private constructor(
                 }
             }
             order(planned, days, DayKind.PLANNED, sortedFlights)
+            bracket(days, sortedFlights.filter { it.departureDate <= today }, passes)
             return DayBook(days, today, sortedFlights, options.policies)
+        }
+
+        /**
+         * Marks the days between a kept pass into a country and the next kept pass out of it,
+         * when no other flight comes between, as proven there: the passes show both ends.
+         */
+        private fun bracket(days: TreeMap<LocalDate, Day>, flown: List<Flight>, passes: Set<Long>) {
+            if (passes.isEmpty()) return
+            for (i in 0 until flown.size - 1) {
+                val inbound = flown[i]
+                val outbound = flown[i + 1]
+                if (inbound.id !in passes || outbound.id !in passes) continue
+                val country = inbound.destinationCountry
+                if (outbound.originCountry != country || outbound.departureDate < inbound.arrivalDate) continue
+                var date = inbound.arrivalDate
+                while (date <= outbound.departureDate) {
+                    val day = days[date]
+                    if (day != null && country in day.countries) days[date] = day.copy(between = day.between + country)
+                    date = date.plusDays(1)
+                }
+            }
         }
 
         /**

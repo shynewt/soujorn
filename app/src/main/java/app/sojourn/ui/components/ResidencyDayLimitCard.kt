@@ -4,27 +4,17 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
@@ -45,9 +35,9 @@ internal fun ResidencyDayLimitCard(
     limit: ResidencyDayLimit,
     modifier: Modifier,
     showForecast: Boolean,
+    expanded: Boolean,
     onClick: (() -> Unit)?,
 ) {
-    var expanded by rememberSaveable(status.rule.id) { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     val dark = scheme.surface.luminance() < 0.5f
     val colors = StatusPalette.forLevel(status.level, dark)
@@ -61,11 +51,7 @@ internal fun ResidencyDayLimitCard(
                     Text(status.headline, style = MaterialTheme.typography.headlineSmallEmphasized, color = colors.accent)
                 }
                 Icon(
-                    when (status.level) {
-                        Level.GOOD -> Icons.Rounded.CheckCircle
-                        Level.CAUTION -> Icons.Rounded.WarningAmber
-                        Level.ALERT -> Icons.Rounded.ErrorOutline
-                    },
+                    levelIcon(status.level),
                     contentDescription = levelLabel(status.level),
                     tint = colors.accent,
                     modifier = Modifier.size(28.dp),
@@ -78,16 +64,12 @@ internal fun ResidencyDayLimitCard(
                     DayFigure("With plans · +${limit.projected - limit.used}", limit.projected, Modifier.weight(1f))
                 }
             }
-            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (expanded) "Hide details" else "Details")
-                Spacer(Modifier.size(4.dp))
-                Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null)
-            }
             if (expanded) {
                 if (limit.needsAbsenceReview) {
                     AlternativeCount(limit, CountrySet.describe(status.rule.countries), StatusPalette.forLevel(Level.CAUTION, dark))
                 }
-                RuleCardDetails(status, levelColors(status.level), showForecast)
+                // The note is already shown above the figures.
+                RuleCardDetails(status.copy(note = null), levelColors(status.level), showForecast)
             }
         }
     }

@@ -77,17 +77,55 @@ fun flightWhen(flight: Flight, today: LocalDate): String {
 fun route(flight: Flight): String =
     "${Countries.flag(flight.originCountry)}\u00A0${flight.origin}  →  ${Countries.flag(flight.destinationCountry)}\u00A0${flight.destination}"
 
-/** A flight as a row: route with flags, cities and number, and when. */
+/** "DOE/JANE MRS", as airlines write a passenger, as "Jane Doe"; other spellings are kept. */
+fun passengerName(passenger: String): String {
+    val parts = passenger.trim().split('/')
+    if (parts.size != 2) return passenger.trim()
+    val given = parts[1].split(' ').filter { it.isNotBlank() && it.uppercase() !in TITLES }
+    fun word(w: String) = w.lowercase().split('-').joinToString("-") { it.replaceFirstChar(Char::titlecase) }
+    return (given + parts[0].split(' ').filter { it.isNotBlank() }).joinToString(" ", transform = ::word)
+}
+
+private val TITLES = setOf("MR", "MRS", "MS", "MISS", "MSTR", "DR", "PROF", "CHD", "INF")
+
+/** "Seat 14C · Ref ABC123 · Jane Doe": what the booking adds, or null when nothing is known. */
+fun bookingLine(flight: Flight): String? = listOfNotNull(
+    flight.seat.ifBlank { null }?.let { "Seat $it" },
+    flight.reference.ifBlank { null }?.let { "Ref $it" },
+    flight.passenger.ifBlank { null }?.let(::passengerName),
+).joinToString(" · ").ifEmpty { null }
+
+/**
+ * A flight as a row: route with flags, cities, number and times, and the booking details when
+ * known. The one flight row of the app, for flights to come (when, in the accent colour) and
+ * flights flown (their date, quieter).
+ */
 @Composable
 fun FlightCard(flight: Flight, today: LocalDate, modifier: Modifier = Modifier, container: Color = MaterialTheme.colorScheme.surfaceContainerLow, onClick: (() -> Unit)? = null) {
+    val past = flight.arrivalDate < today
+    val label = flightWhen(flight, today)
+    val times = flightTimes(flight)
+    // The date only when the label doesn't already say it.
+    val details = listOfNotNull(
+        Airlines.format(flight.number).ifBlank { null },
+        times,
+        Format.short(flight.departureDate, today).takeIf { times == null && it != label },
+    )
     val content: @Composable () -> Unit = {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            ShapeIcon(Icons.Rounded.Flight, size = 48.dp, shape = MaterialShapes.Cookie6Sided.toShape())
+            ShapeIcon(
+                Icons.Rounded.Flight,
+                size = 48.dp,
+                shape = MaterialShapes.Cookie6Sided.toShape(),
+                container = if (past) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer,
+                content = if (past) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
+            )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(route(flight), style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.weight(1f))
-                    Text(flightWhen(flight, today), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(route(flight), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(8.dp))
+                    Text(label, style = MaterialTheme.typography.labelLarge, color = if (past) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
                 }
                 Text(
                     "${airportPlace(flight.origin)} → ${airportPlace(flight.destination)}",
@@ -96,13 +134,12 @@ fun FlightCard(flight: Flight, today: LocalDate, modifier: Modifier = Modifier, 
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    listOfNotNull(Airlines.format(flight.number).ifBlank { null }, flightTimes(flight) ?: Format.short(flight.departureDate, today)).joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (details.isNotEmpty()) {
+                    Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                bookingLine(flight)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }

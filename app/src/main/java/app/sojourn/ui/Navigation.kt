@@ -14,15 +14,21 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.EditCalendar
 import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.material.icons.outlined.FolderCopy
 import androidx.compose.material.icons.rounded.CalendarMonth
-import androidx.compose.material.icons.rounded.EditCalendar
 import androidx.compose.material.icons.rounded.Explore
-import androidx.compose.material.icons.rounded.Timeline
+import androidx.compose.material.icons.rounded.FolderCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.remember
+import app.sojourn.data.db.Flight
+import app.sojourn.data.db.Plan
+import app.sojourn.ui.evidence.EvidencePackScreen
+import app.sojourn.ui.evidence.EvidenceTab
+import androidx.navigation.toRoute
 import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Text
@@ -56,13 +62,11 @@ import app.sojourn.ui.calendar.CalendarScreen
 import app.sojourn.ui.home.HomeScreen
 import app.sojourn.ui.onboarding.OnboardingScreen
 import app.sojourn.ui.imports.ImportScreen
-import app.sojourn.ui.plan.PlanScreen
 import app.sojourn.ui.reports.FeieScreen
 import app.sojourn.ui.reports.HistoryScreen
 import app.sojourn.ui.rules.RulesScreen
 import app.sojourn.ui.settings.SettingsScreen
 import app.sojourn.ui.theme.SojournTheme
-import app.sojourn.ui.timeline.TimelineScreen
 import kotlin.reflect.KClass
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
@@ -71,27 +75,26 @@ import kotlinx.serialization.Serializable
 
 @Serializable data object CalendarRoute
 
-@Serializable data object PlanRoute
+@Serializable data object EvidenceTabRoute
 
-@Serializable data object TimelineRoute
+/** Settings, opened at [section] (a [SettingsSection] name) when given. */
+@Serializable data class SettingsRoute(val section: String? = null)
 
-@Serializable data object SettingsRoute
-
-@Serializable data object RulesRoute
+/** The rules, with rule [ruleId] open in its editor when given. */
+@Serializable data class RulesRoute(val ruleId: Long = -1)
 
 @Serializable data object FeieRoute
 
 @Serializable data object HistoryRoute
 
-@Serializable data object EvidenceRoute
+@Serializable data class EvidencePackRoute(val year: Int)
 
 @Serializable data object ImportRoute
 
-private enum class Tab(val route: Any, val type: KClass<*>, val label: String, val icon: ImageVector, val selected: ImageVector) {
-    HOME(HomeRoute, HomeRoute::class, "Today", Icons.Outlined.Explore, Icons.Rounded.Explore),
-    CALENDAR(CalendarRoute, CalendarRoute::class, "Calendar", Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
-    PLAN(PlanRoute, PlanRoute::class, "Plan", Icons.Outlined.EditCalendar, Icons.Rounded.EditCalendar),
-    TIMELINE(TimelineRoute, TimelineRoute::class, "Timeline", Icons.Outlined.Timeline, Icons.Rounded.Timeline),
+private enum class Tab(val app: AppTab, val route: Any, val type: KClass<*>, val label: String, val icon: ImageVector, val selected: ImageVector) {
+    TODAY(AppTab.TODAY, HomeRoute, HomeRoute::class, "Today", Icons.Outlined.Explore, Icons.Rounded.Explore),
+    CALENDAR(AppTab.CALENDAR, CalendarRoute, CalendarRoute::class, "Calendar", Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
+    EVIDENCE(AppTab.EVIDENCE, EvidenceTabRoute, EvidenceTabRoute::class, "Evidence", Icons.Outlined.FolderCopy, Icons.Rounded.FolderCopy),
 }
 
 /**
@@ -127,6 +130,9 @@ fun SojournRoot() {
 @Composable
 private fun MainScaffold() {
     val nav = rememberNavController()
+    val shell = appViewModel { ShellViewModel(it) }
+    val colors by shell.colors.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
     val entry by nav.currentBackStackEntryAsState()
     val tab = Tab.entries.firstOrNull { entry?.destination?.hasRoute(it.type) == true }
     val incoming by LocalIncomingFiles.current.collectAsStateWithLifecycle()
@@ -135,55 +141,85 @@ private fun MainScaffold() {
         val waiting = incoming.isNotEmpty() || incomingText != null
         if (waiting && nav.currentDestination?.hasRoute(ImportRoute::class) != true) nav.navigate(ImportRoute)
     }
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
-        bottomBar = {
-            AnimatedVisibility(tab != null, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
-                ShortNavigationBar {
-                    Tab.entries.forEach { item ->
-                        ShortNavigationBarItem(
-                            selected = tab == item,
-                            onClick = { nav.switchTab(item.route) },
-                            icon = { Icon(if (tab == item) item.selected else item.icon, contentDescription = null) },
-                            label = { Text(item.label) },
-                        )
+    val actions = remember(nav, shell) {
+        object : AppActions {
+            override fun tab(tab: AppTab) = nav.switchTab(Tab.entries.first { it.app == tab }.route)
+            override fun calendar(day: java.time.LocalDate?, list: Boolean) {
+                shell.showCalendar(CalendarRequest(day, list))
+                nav.switchTab(CalendarRoute)
+            }
+            override fun settings(section: SettingsSection?) = nav.navigate(SettingsRoute(section?.name))
+            override fun rules(ruleId: Long?) = nav.navigate(RulesRoute(ruleId ?: -1))
+            override fun import() = nav.navigate(ImportRoute)
+            override fun history() = nav.navigate(HistoryRoute)
+            override fun feie() = nav.navigate(FeieRoute)
+            override fun evidencePack(year: Int) = nav.navigate(EvidencePackRoute(year))
+            override fun flight(flight: Flight?, date: java.time.LocalDate?) = shell.open(Editor.FlightEdit(flight, date))
+            override fun planStay(plan: Plan?, start: java.time.LocalDate?) = shell.open(
+                Editor.StayEdit(plan ?: Plan(country = "", start = start ?: java.time.LocalDate.MIN, end = start ?: java.time.LocalDate.MIN)),
+            )
+            override fun addEvidence(draft: EvidenceDraft) = shell.open(Editor.EvidenceAdd(draft))
+        }
+    }
+    UndoChanges(shell, snackbar)
+    CompositionLocalProvider(LocalAppActions provides actions, LocalCountryColors provides colors, LocalCalendarRequests provides shell) {
+        Scaffold(
+            contentWindowInsets = WindowInsets(0),
+            snackbarHost = { SnackbarHost(snackbar) },
+            bottomBar = {
+                AnimatedVisibility(tab != null, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
+                    ShortNavigationBar {
+                        Tab.entries.forEach { item ->
+                            ShortNavigationBarItem(
+                                selected = tab == item,
+                                onClick = { nav.switchTab(item.route) },
+                                icon = { Icon(if (tab == item) item.selected else item.icon, contentDescription = null) },
+                                label = { Text(item.label) },
+                            )
+                        }
                     }
                 }
+            },
+        ) { padding ->
+            NavHost(
+                navController = nav,
+                startDestination = HomeRoute,
+                modifier = Modifier.padding(padding).consumeWindowInsets(padding),
+                // Tabs swap with a quick fade-through, as Material's motion guidance has for top-level destinations.
+                enterTransition = { fadeIn(tween(210, delayMillis = 90)) + scaleIn(tween(210, delayMillis = 90), initialScale = 0.92f) },
+                exitTransition = { fadeOut(tween(90)) },
+                popEnterTransition = { fadeIn(tween(210, delayMillis = 90)) + scaleIn(tween(210, delayMillis = 90), initialScale = 0.92f) },
+                popExitTransition = { fadeOut(tween(90)) },
+            ) {
+                composable<HomeRoute> { HomeScreen() }
+                composable<CalendarRoute> { CalendarScreen() }
+                composable<EvidenceTabRoute> { EvidenceTab() }
+                pushed<SettingsRoute> { entry ->
+                    val route = entry.toRoute<SettingsRoute>()
+                    SettingsScreen(section = route.section?.let { runCatching { SettingsSection.valueOf(it) }.getOrNull() }, back = { nav.popBackStack() })
+                }
+                pushed<RulesRoute> { entry -> RulesScreen(ruleId = entry.toRoute<RulesRoute>().ruleId.takeIf { it >= 0 }, back = { nav.popBackStack() }) }
+                pushed<FeieRoute> { FeieScreen(back = { nav.popBackStack() }) }
+                pushed<HistoryRoute> { HistoryScreen(back = { nav.popBackStack() }) }
+                pushed<EvidencePackRoute> { entry -> EvidencePackScreen(year = entry.toRoute<EvidencePackRoute>().year, back = { nav.popBackStack() }) }
+                pushed<ImportRoute> { ImportScreen(back = { nav.popBackStack() }) }
             }
-        },
-    ) { padding ->
-        NavHost(
-            navController = nav,
-            startDestination = HomeRoute,
-            modifier = Modifier.padding(padding).consumeWindowInsets(padding),
-            // Tabs swap with a quick fade-through, as Material's motion guidance has for top-level destinations.
-            enterTransition = { fadeIn(tween(210, delayMillis = 90)) + scaleIn(tween(210, delayMillis = 90), initialScale = 0.92f) },
-            exitTransition = { fadeOut(tween(90)) },
-            popEnterTransition = { fadeIn(tween(210, delayMillis = 90)) + scaleIn(tween(210, delayMillis = 90), initialScale = 0.92f) },
-            popExitTransition = { fadeOut(tween(90)) },
-        ) {
-            composable<HomeRoute> { HomeScreen(navigate = { nav.navigate(it) }, switchTab = { nav.switchTab(it) }) }
-            composable<CalendarRoute> { CalendarScreen() }
-            composable<PlanRoute> { PlanScreen(openRules = { nav.navigate(RulesRoute) }) }
-            composable<TimelineRoute> { TimelineScreen() }
-            pushed<SettingsRoute> { SettingsScreen(back = { nav.popBackStack() }, openRules = { nav.navigate(RulesRoute) }) }
-            pushed<RulesRoute> { RulesScreen(back = { nav.popBackStack() }) }
-            pushed<FeieRoute> { FeieScreen(back = { nav.popBackStack() }) }
-            pushed<HistoryRoute> { HistoryScreen(back = { nav.popBackStack() }) }
-            pushed<EvidenceRoute> { app.sojourn.ui.reports.EvidenceScreen(back = { nav.popBackStack() }) }
-            pushed<ImportRoute> { ImportScreen(back = { nav.popBackStack() }) }
         }
+        SharedEditors(shell)
     }
 }
 
+/** Requests for the Calendar tab to show a day or the list, made from other screens. */
+val LocalCalendarRequests = staticCompositionLocalOf<ShellViewModel?> { null }
+
 /** Screens stacked on top of the tabs slide in from the side. */
-private inline fun <reified T : Any> androidx.navigation.NavGraphBuilder.pushed(noinline content: @Composable () -> Unit) {
+private inline fun <reified T : Any> androidx.navigation.NavGraphBuilder.pushed(noinline content: @Composable (androidx.navigation.NavBackStackEntry) -> Unit) {
     composable<T>(
         enterTransition = { slideInHorizontally(tween(320)) { it / 5 } + fadeIn(tween(320)) },
         exitTransition = { fadeOut(tween(160)) },
         popEnterTransition = { fadeIn(tween(260)) },
         popExitTransition = { slideOutHorizontally(tween(260)) { it / 5 } + fadeOut(tween(260)) },
-    ) { content() }
+    ) { content(it) }
 }
 
 private fun NavHostController.switchTab(route: Any) {

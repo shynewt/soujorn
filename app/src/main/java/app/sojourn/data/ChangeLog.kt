@@ -52,16 +52,21 @@ data class LoggedFlight(
     val departureMinute: Int? = null,
     val arrivalMinute: Int? = null,
     val note: String = "",
+    val reference: String = "",
+    val passenger: String = "",
+    val seat: String = "",
 ) {
     fun toFlight() = Flight(
         id, number, origin, destination, originCountry, destinationCountry,
         LocalDate.parse(departureDate), LocalDate.parse(arrivalDate), departureMinute, arrivalMinute, note,
+        reference, passenger, seat,
     )
 
     companion object {
         fun of(f: Flight) = LoggedFlight(
             f.id, f.number, f.origin, f.destination, f.originCountry, f.destinationCountry,
             f.departureDate.toString(), f.arrivalDate.toString(), f.departureMinute, f.arrivalMinute, f.note,
+            f.reference, f.passenger, f.seat,
         )
     }
 }

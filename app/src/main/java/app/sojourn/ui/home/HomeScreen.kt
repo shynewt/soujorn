@@ -1,9 +1,8 @@
 package app.sojourn.ui.home
 
+import app.sojourn.ui.components.YearMenu
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,41 +15,47 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.CellTower
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.EditCalendar
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Flight
-import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.NoteAdd
 import androidx.compose.material.icons.rounded.PauseCircle
 import androidx.compose.material.icons.rounded.PhotoLibrary
-import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.RequestQuote
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material3.SuggestionChip
-import androidx.compose.material3.SuggestionChipDefaults
+import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FloatingActionButtonMenu
+import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ToggleFloatingActionButton
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,38 +65,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.sojourn.data.Countries
 import app.sojourn.data.TrackingMode
-import app.sojourn.data.db.Flight
-import app.sojourn.data.flights.Airlines
-import app.sojourn.ui.PlanRoute
-import app.sojourn.ui.flights.airportPlace
-import app.sojourn.ui.flights.flightTimes
-import app.sojourn.ui.flights.flightWhen
-import app.sojourn.ui.flights.route
+import app.sojourn.data.db.Plan
 import app.sojourn.data.db.Source
 import app.sojourn.data.geo.WorldMapData
-import app.sojourn.ui.FeieRoute
-import app.sojourn.ui.HistoryRoute
-import app.sojourn.ui.EvidenceRoute
-import androidx.compose.material.icons.rounded.FolderZip
-import app.sojourn.ui.ImportRoute
-import app.sojourn.ui.RulesRoute
-import app.sojourn.ui.SettingsRoute
-import app.sojourn.ui.TimelineRoute
+import app.sojourn.ui.LocalAppActions
+import app.sojourn.ui.LocalCountryColors
+import app.sojourn.ui.SettingsSection
 import app.sojourn.ui.appViewModel
 import app.sojourn.ui.components.BarSegment
+import app.sojourn.ui.components.ChoiceGroup
 import app.sojourn.ui.components.CountryPickerSheet
 import app.sojourn.ui.components.FlagBadge
-import app.sojourn.ui.components.ChoiceGroup
 import app.sojourn.ui.components.Format
 import app.sojourn.ui.components.LegendDot
 import app.sojourn.ui.components.RuleCard
@@ -99,13 +92,15 @@ import app.sojourn.ui.components.SectionHeader
 import app.sojourn.ui.components.ShapeIcon
 import app.sojourn.ui.components.StackedBar
 import app.sojourn.ui.components.WorldMap
-import app.sojourn.ui.theme.CountryPalette
+import app.sojourn.ui.flights.FlightCard
 
+/** Today: where you stand. See docs/ui-redesign.md. */
 @Composable
-fun HomeScreen(navigate: (Any) -> Unit, switchTab: (Any) -> Unit) {
+fun HomeScreen() {
     val vm = appViewModel { HomeViewModel(it) }
     val state by vm.state.collectAsStateWithLifecycle()
     val map by vm.map.collectAsStateWithLifecycle()
+    val dismissed by vm.dismissed.collectAsStateWithLifecycle()
     val context = LocalContext.current
     HomeContent(
         state = state,
@@ -113,11 +108,14 @@ fun HomeScreen(navigate: (Any) -> Unit, switchTab: (Any) -> Unit) {
         onYear = vm::selectYear,
         onCheckNow = { vm.checkNow(context) },
         onSetToday = vm::setToday,
-        navigate = navigate,
-        switchTab = switchTab,
+        dismissed = dismissed,
+        onConfirmPlan = vm::confirmPlan,
+        onDeletePlan = vm::deletePlan,
+        onDismiss = vm::dismiss,
     )
 }
 
+/** Today without its view model, for screenshot tests. Everything else opens through [LocalAppActions]. */
 @Composable
 fun HomeContent(
     state: HomeState,
@@ -125,45 +123,72 @@ fun HomeContent(
     onYear: (Int?) -> Unit,
     onCheckNow: () -> Unit,
     onSetToday: (String) -> Unit,
-    navigate: (Any) -> Unit,
-    switchTab: (Any) -> Unit,
+    dismissed: Set<String> = emptySet(),
+    onConfirmPlan: (Plan) -> Unit = {},
+    onDeletePlan: (Plan) -> Unit = {},
+    onDismiss: (Attention) -> Unit = {},
 ) {
+    val actions = LocalAppActions.current
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var picking by rememberSaveable { mutableStateOf(false) }
+    val attention = state.attention.filter { it.key !in dismissed }
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text("Sojourn") },
+                title = { Text("Today") },
                 subtitle = { Text(Format.long(state.today)) },
                 actions = {
-                    IconButton(onClick = { navigate(SettingsRoute) }) { Icon(Icons.Rounded.Settings, contentDescription = "Settings") }
+                    IconButton(onClick = { actions.settings() }) { Icon(Icons.Rounded.Settings, contentDescription = "Settings") }
                 },
                 scrollBehavior = scroll,
             )
         },
+        floatingActionButton = { AddMenu(onLogToday = { picking = true }) },
     ) { padding ->
         LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 4.dp, bottom = padding.calculateBottomPadding() + 24.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 4.dp, bottom = padding.calculateBottomPadding() + 104.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "now") { NowCard(state, onCheckNow, onSetToday, onPickOther = { picking = true }) }
-            state.nextFlight?.let { flight -> item(key = "flight") { NextFlightCard(flight, state.today) { switchTab(PlanRoute) } } }
-            if (state.years.isNotEmpty()) item(key = "years") { YearSwitcher(state.years, state.year, onYear) }
-            item(key = "summary") { SummaryCard(state, map) }
-            if (state.untracked > 0) item(key = "gaps") { UntrackedCard(state.untracked) { switchTab(TimelineRoute) } }
-            item(key = "limits") {
-                SectionHeader("Limits & residency", Modifier.padding(top = 8.dp)) {
-                    TextButton(onClick = { navigate(RulesRoute) }) { Text("Manage") }
+
+            if (attention.isNotEmpty()) {
+                item(key = "attention-header") { SectionHeader("Needs attention", Modifier.padding(top = 8.dp)) }
+                item(key = "attention") { AttentionList(attention, state, onConfirmPlan, onDeletePlan, onDismiss) }
+            }
+
+            item(key = "rules-header") {
+                SectionHeader("Rules", Modifier.padding(top = 8.dp)) {
+                    if (state.statuses.isNotEmpty()) TextButton(onClick = { actions.rules() }) { Text("Manage") }
                 }
             }
             if (state.statuses.isEmpty()) {
-                item(key = "no-rules") { NoRulesCard { navigate(RulesRoute) } }
+                item(key = "no-rules") { NoRulesCard { actions.rules() } }
             } else {
-                items(state.statuses, key = { "rule-${it.rule.id}" }) { RuleCard(it, onClick = { navigate(RulesRoute) }) }
+                items(state.statuses, key = { "rule-${it.rule.id}" }) { status ->
+                    RuleCard(status, onClick = { actions.rules(status.rule.id) })
+                }
             }
-            item(key = "tools-header") { SectionHeader("Tools", Modifier.padding(top = 8.dp)) }
-            item(key = "tools") { Tools(state.settings.usTaxpayer, navigate) }
+
+            state.nextFlight?.let { flight ->
+                item(key = "flight-header") { SectionHeader("Next flight", Modifier.padding(top = 8.dp)) }
+                item(key = "flight") { FlightCard(flight, state.today, onClick = { actions.flight(flight) }) }
+            }
+
+            item(key = "year-header") {
+                SectionHeader(
+                    when (state.year) {
+                        null -> "All time"
+                        state.today.year -> "This year"
+                        else -> state.year.toString()
+                    },
+                    Modifier.padding(top = 8.dp),
+                ) {
+                    // A menu, so years of history fit; "All time" sums them.
+                    if (state.years.size > 1) YearMenu(state.year, state.years, onYear, allTime = true)
+                }
+            }
+            item(key = "summary") { SummaryCard(state, map) }
         }
     }
     if (picking) {
@@ -179,6 +204,50 @@ fun HomeContent(
     }
 }
 
+/** Everything that can be added, from the one place that's always there. */
+@Composable
+private fun AddMenu(onLogToday: () -> Unit) {
+    val actions = LocalAppActions.current
+    var open by rememberSaveable { mutableStateOf(false) }
+    FloatingActionButtonMenu(
+        expanded = open,
+        button = {
+            ToggleFloatingActionButton(
+                checked = open,
+                onCheckedChange = { open = it },
+                containerSize = ToggleFloatingActionButtonDefaults.containerSizeMedium(),
+                containerCornerRadius = ToggleFloatingActionButtonDefaults.containerCornerRadiusMedium(),
+            ) {
+                val icon by remember { derivedStateOf { if (checkedProgress > 0.5f) Icons.Rounded.Close else Icons.Rounded.Add } }
+                Icon(
+                    icon,
+                    contentDescription = if (open) "Close" else "Add",
+                    modifier = Modifier.animateIcon({ checkedProgress }, size = ToggleFloatingActionButtonDefaults.iconSizeMedium()),
+                )
+            }
+        },
+    ) {
+        val items = listOf(
+            Triple(Icons.Rounded.Today, "Log today", onLogToday),
+            Triple(Icons.Rounded.Flight, "Add a flight") { actions.flight() },
+            Triple(Icons.Rounded.EditCalendar, "Plan a stay") { actions.planStay() },
+            Triple(Icons.Rounded.NoteAdd, "Add evidence") { actions.addEvidence() },
+            Triple(Icons.Rounded.PhotoLibrary, "Import") { actions.import() },
+        )
+        items.forEach { (icon, label, action) ->
+            FloatingActionButtonMenuItem(
+                onClick = {
+                    open = false
+                    action()
+                },
+                icon = { Icon(icon, contentDescription = null) },
+                text = { Text(label) },
+            )
+        }
+    }
+}
+
+/** The screen's one expressive moment: where you are, since when, and how Sojourn knows. */
 @Composable
 private fun NowCard(state: HomeState, onCheckNow: () -> Unit, onSetToday: (String) -> Unit, onPickOther: () -> Unit) {
     val current = state.current
@@ -199,18 +268,23 @@ private fun NowCard(state: HomeState, onCheckNow: () -> Unit, onSetToday: (Strin
                     Column {
                         Text("Where are you today?", style = MaterialTheme.typography.titleLargeEmphasized, color = onContainer)
                         Text(
-                            if (state.settings.tracking == TrackingMode.OFF) "Add today by hand, or turn on tracking in settings." else "The first check runs shortly.",
+                            if (state.settings.tracking == TrackingMode.OFF) "Add today by hand, or turn tracking on." else "The first check runs shortly.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = onContainer,
                         )
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = onPickOther) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Set today's country")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = onPickOther) {
+                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Set today's country")
+                    }
+                    Spacer(Modifier.weight(1f))
                 }
+                Spacer(Modifier.height(12.dp))
+                TrackingRow(state, onCheckNow)
                 return@Column
             }
 
@@ -242,34 +316,14 @@ private fun NowCard(state: HomeState, onCheckNow: () -> Unit, onSetToday: (Strin
                 }
             }
             Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val settings = state.settings
-                val (icon, text) = when {
-                    settings.tracking == TrackingMode.OFF -> Icons.Rounded.PauseCircle to "Tracking is off"
-                    settings.lastCheck == null -> Icons.Rounded.MyLocation to "Waiting for the first check"
-                    settings.lastCheckSource == Source.NETWORK.name -> Icons.Rounded.CellTower to "Mobile network · ${Format.ago(settings.lastCheck)}"
-                    else -> Icons.Rounded.MyLocation to "Location · ${Format.ago(settings.lastCheck)}"
-                }
-                Row(
-                    Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainerLowest).padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(icon, contentDescription = null, tint = onContainer, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(text, style = MaterialTheme.typography.labelMedium, color = onContainer)
-                }
-                Spacer(Modifier.weight(1f))
-                if (settings.tracking != TrackingMode.OFF) {
-                    FilledTonalIconButton(onClick = onCheckNow) { Icon(Icons.Rounded.Refresh, contentDescription = "Check now") }
-                }
-            }
+            TrackingRow(state, onCheckNow)
             if (!isToday) {
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     // Suggested replies to "where are you today?", so suggestion chips.
                     SuggestionChip(
                         onClick = { onSetToday(country) },
-                        label = { Text("Still in ${Countries.name(country)}") },
+                        label = { Text("Still in ${Countries.name(country)}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         colors = SuggestionChipDefaults.suggestionChipColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                     )
                     SuggestionChip(
@@ -284,50 +338,48 @@ private fun NowCard(state: HomeState, onCheckNow: () -> Unit, onSetToday: (Strin
     }
 }
 
+/**
+ * How Sojourn knows: the last check, or that tracking is off. Tapping it opens Tracking in
+ * Settings; Check now sits beside it while tracking runs.
+ */
 @Composable
-private fun NextFlightCard(flight: Flight, today: java.time.LocalDate, onClick: () -> Unit) {
-    val onContainer = MaterialTheme.colorScheme.onSecondaryContainer
-    Surface(onClick = onClick, shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            ShapeIcon(
-                Icons.Rounded.Flight,
-                size = 56.dp,
-                shape = MaterialShapes.Cookie6Sided.toShape(),
-                container = MaterialTheme.colorScheme.secondary,
-                content = MaterialTheme.colorScheme.onSecondary,
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Next flight · ${flightWhen(flight, today).lowercase()}", style = MaterialTheme.typography.labelLarge, color = onContainer)
-                Text(route(flight), style = MaterialTheme.typography.titleLargeEmphasized, color = onContainer, maxLines = 1)
-                Text(
-                    "${airportPlace(flight.origin)} → ${airportPlace(flight.destination)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = onContainer,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    listOfNotNull(Format.short(flight.departureDate, today), flightTimes(flight), Airlines.format(flight.number).ifBlank { null }).joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = onContainer,
-                )
+private fun TrackingRow(state: HomeState, onCheckNow: () -> Unit) {
+    val actions = LocalAppActions.current
+    val settings = state.settings
+    val onContainer = MaterialTheme.colorScheme.onPrimaryContainer
+    val icon = when {
+        settings.tracking == TrackingMode.OFF -> Icons.Rounded.PauseCircle
+        settings.lastCheck != null && settings.lastCheckSource == Source.NETWORK.name -> Icons.Rounded.CellTower
+        else -> Icons.Rounded.MyLocation
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+            onClick = { actions.settings(SettingsSection.TRACKING) },
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+            contentColor = onContainer,
+        ) {
+            Row(Modifier.height(36.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(app.sojourn.ui.settings.lastCheckText(settings), style = MaterialTheme.typography.labelMedium)
             }
         }
+        Spacer(Modifier.weight(1f))
+        if (settings.tracking != TrackingMode.OFF) {
+            FilledTonalIconButton(onClick = onCheckNow) { Icon(Icons.Rounded.Refresh, contentDescription = "Check now") }
+        }
     }
-}
-
-@Composable
-private fun YearSwitcher(years: List<Int>, selected: Int?, onYear: (Int?) -> Unit) {
-    val options: List<Int?> = years.take(3).reversed() + listOf(null)
-    ChoiceGroup(options.map { it to (it?.toString() ?: "All time") }, selected, onYear)
 }
 
 @Composable
 private fun SummaryCard(state: HomeState, map: WorldMapData?) {
     val summary = state.summary
     val visited = summary?.countries?.filter { it.days > 0 }.orEmpty()
-    val colors = remember(visited) { CountryPalette.assign(visited.map { it.country }) }
+    // The one palette, so a country is the same colour here as in the calendar and the plan.
+    val palette = LocalCountryColors.current
+    val other = MaterialTheme.colorScheme.outline
+    val colors = remember(visited, palette, other) { visited.associate { it.country to (palette[it.country] ?: other) } }
     var selected by remember { mutableStateOf<String?>(null) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(32.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
@@ -341,15 +393,12 @@ private fun SummaryCard(state: HomeState, map: WorldMapData?) {
             )
             Spacer(Modifier.height(16.dp))
             Column(Modifier.padding(horizontal = 20.dp)) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(state.year?.toString() ?: "All time", style = MaterialTheme.typography.headlineSmallEmphasized, modifier = Modifier.weight(1f))
-                    val tracked = summary?.trackedDays ?: 0
-                    Text(
-                        if (state.year == null) "${Format.days(tracked)} · ${visited.size} countries" else "$tracked of ${state.elapsedDays} days",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                val tracked = summary?.trackedDays ?: 0
+                Text(
+                    if (state.year == null) "${Format.days(tracked)} recorded · ${visited.size} countries" else "$tracked of ${state.elapsedDays} days recorded · ${visited.size} countries",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Spacer(Modifier.height(12.dp))
                 if (visited.isEmpty()) {
                     Text(
@@ -408,21 +457,6 @@ private fun SummaryCard(state: HomeState, map: WorldMapData?) {
 }
 
 @Composable
-private fun UntrackedCard(days: Int, onClick: () -> Unit) {
-    Surface(onClick = onClick, shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            ShapeIcon(Icons.AutoMirrored.Rounded.HelpOutline, container = MaterialTheme.colorScheme.tertiary, content = MaterialTheme.colorScheme.onTertiary, shape = MaterialShapes.Sunny.toShape())
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text("${Format.days(days)} without a country", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                Text("Fill them in so every count stays right", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
-            }
-            Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
-        }
-    }
-}
-
-@Composable
 private fun NoRulesCard(onAdd: () -> Unit) {
     Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp)) {
@@ -439,47 +473,6 @@ private fun NoRulesCard(onAdd: () -> Unit) {
             )
             Spacer(Modifier.height(12.dp))
             FilledTonalButton(onClick = onAdd) { Text("Add a rule") }
-        }
-    }
-}
-
-private data class Tool(val title: String, val subtitle: String, val icon: ImageVector, val route: Any)
-
-@Composable
-private fun Tools(usTaxpayer: Boolean, navigate: (Any) -> Unit) {
-    val tools = buildList {
-        add(Tool("Import history", "From photos, GPX tracks or Google Timeline", Icons.Rounded.PhotoLibrary, ImportRoute))
-        add(Tool("Travel history", "Every country and trip, for visa, residence and citizenship files", Icons.Rounded.Public, HistoryRoute))
-        add(Tool("Evidence pack", "A year's photos, passes and bookings, for a residence certificate", Icons.Rounded.FolderZip, EvidenceRoute))
-        if (usTaxpayer) add(Tool("Form 2555", "FEIE physical presence test, pre-filled", Icons.Rounded.RequestQuote, FeieRoute))
-        add(Tool("Backup", "Export, restore, or back up to a folder", Icons.Rounded.Backup, SettingsRoute))
-    }
-    val shapes: List<Shape> = listOf(
-        MaterialShapes.Cookie6Sided.toShape(),
-        MaterialShapes.Clover4Leaf.toShape(),
-        MaterialShapes.Gem.toShape(),
-        MaterialShapes.Pentagon.toShape(),
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        tools.chunked(2).forEachIndexed { row, pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                pair.forEachIndexed { column, tool ->
-                    Surface(
-                        onClick = { navigate(tool.route) },
-                        shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        modifier = Modifier.weight(1f).height(148.dp),
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            ShapeIcon(tool.icon, shape = shapes[(row * 2 + column) % shapes.size])
-                            Spacer(Modifier.weight(1f))
-                            Text(tool.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                            Text(tool.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
-            }
         }
     }
 }

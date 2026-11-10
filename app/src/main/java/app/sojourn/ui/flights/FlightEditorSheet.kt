@@ -5,7 +5,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,23 +23,28 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Event
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Flight
 import androidx.compose.material.icons.rounded.FlightLand
 import androidx.compose.material.icons.rounded.FlightTakeoff
-import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SwapVert
-import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -50,6 +55,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimeInput
@@ -59,32 +65,171 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import app.sojourn.container
 import app.sojourn.data.Countries
 import app.sojourn.data.db.Flight
 import app.sojourn.data.flights.Airlines
 import app.sojourn.data.flights.Airport
+import app.sojourn.data.flights.AirportDirectory
 import app.sojourn.data.flights.FlightText
-import app.sojourn.domain.Level
 import app.sojourn.domain.RuleStatus
 import app.sojourn.ui.components.Format
+import app.sojourn.ui.components.SectionHeader
 import app.sojourn.ui.components.ShapeIcon
-import app.sojourn.ui.components.levelColor
 import app.sojourn.ui.components.segmentedColors
+import app.sojourn.ui.plan.LevelIcon
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
+
+/**
+ * What's being typed into the flight editor. Kept apart from the sheet so the editor's content
+ * can be drawn on its own, and saved across rotation as one piece.
+ */
+@Stable
+class FlightForm private constructor(val id: Long) {
+    var number by mutableStateOf("")
+    var origin by mutableStateOf<String?>(null)
+    var destination by mutableStateOf<String?>(null)
+    var date by mutableStateOf<LocalDate?>(null)
+    var dayShift by mutableIntStateOf(0)
+    var departs by mutableStateOf<Int?>(null)
+    var arrives by mutableStateOf<Int?>(null)
+    var note by mutableStateOf("")
+    var reference by mutableStateOf("")
+    var passenger by mutableStateOf("")
+    var seat by mutableStateOf("")
+
+    /** What the saved flight said when last seen, to tell the user's edits from what it gained since. */
+    private var known = Known()
+
+    constructor(initial: Flight?) : this(initial?.id ?: 0) {
+        if (initial == null) return
+        origin = initial.origin.ifBlank { null }
+        destination = initial.destination.ifBlank { null }
+        date = initial.departureDate.takeIf { it != LocalDate.MIN }
+        dayShift = if (date == null) 0 else ChronoUnit.DAYS.between(initial.departureDate, initial.arrivalDate).toInt()
+        note = initial.note
+        known = Known.of(initial)
+        known.apply(this)
+    }
+
+    /**
+     * Takes what [saved] learnt while the editor was open (a boarding pass attached from it
+     * fills in the reference, passenger and seat) into each field the user hasn't changed.
+     */
+    fun follow(saved: Flight) {
+        val now = Known.of(saved)
+        if (now == known) return
+        if (number == known.number) number = now.number
+        if (reference == known.reference) reference = now.reference
+        if (passenger == known.passenger) passenger = now.passenger
+        if (seat == known.seat) seat = now.seat
+        if (departs == known.departs) departs = now.departs
+        if (arrives == known.arrives) arrives = now.arrives
+        known = now
+    }
+
+    /** The fields a boarding pass or booking can fill in on a saved flight, as the form shows them. */
+    private data class Known(
+        val number: String = "",
+        val reference: String = "",
+        val passenger: String = "",
+        val seat: String = "",
+        val departs: Int? = null,
+        val arrives: Int? = null,
+    ) {
+        fun apply(form: FlightForm) {
+            form.number = number
+            form.reference = reference
+            form.passenger = passenger
+            form.seat = seat
+            form.departs = departs
+            form.arrives = arrives
+        }
+
+        fun toList(): List<Any?> = listOf(number, reference, passenger, seat, departs, arrives)
+
+        companion object {
+            fun of(flight: Flight) = Known(Airlines.format(flight.number), flight.reference, flight.passenger, flight.seat, flight.departureMinute, flight.arrivalMinute)
+
+            fun from(saved: List<Any?>) = Known(saved[0] as String, saved[1] as String, saved[2] as String, saved[3] as String, saved[4] as Int?, saved[5] as Int?)
+        }
+    }
+
+    /** The flight as it would be saved, or null while the airports or date are missing. */
+    fun draft(airports: AirportDirectory?): Flight? {
+        val from = origin?.let { airports?.get(it) } ?: return null
+        val to = destination?.let { airports?.get(it) } ?: return null
+        val day = date ?: return null
+        if (from.code == to.code) return null
+        return Flight(
+            id = id,
+            number = number.filter { it.isLetterOrDigit() }.uppercase(),
+            origin = from.code,
+            destination = to.code,
+            originCountry = from.country,
+            destinationCountry = to.country,
+            departureDate = day,
+            arrivalDate = day.plusDays(dayShift.toLong()),
+            departureMinute = departs,
+            arrivalMinute = arrives,
+            note = note.trim(),
+            reference = reference.trim().uppercase(),
+            passenger = passenger.trim(),
+            seat = seat.trim().uppercase(),
+        )
+    }
+
+    companion object {
+        val Saver = listSaver<FlightForm, Any?>(
+            save = { listOf(it.id, it.number, it.origin, it.destination, it.date, it.dayShift, it.departs, it.arrives, it.note, it.reference, it.passenger, it.seat) + it.known.toList() },
+            restore = { saved ->
+                FlightForm(saved[0] as Long).apply {
+                    number = saved[1] as String
+                    origin = saved[2] as String?
+                    destination = saved[3] as String?
+                    date = saved[4] as LocalDate?
+                    dayShift = saved[5] as Int
+                    departs = saved[6] as Int?
+                    arrives = saved[7] as Int?
+                    note = saved[8] as String
+                    reference = saved[9] as String
+                    passenger = saved[10] as String
+                    seat = saved[11] as String
+                    known = Known.from(saved.drop(12))
+                }
+            },
+        )
+    }
+}
+
+/** What pasting did: [filled] when it found a flight, otherwise why not. */
+data class PasteResult(val text: String, val filled: Boolean)
 
 /** Creates or edits a flight; the countries, travel days and the stay after it follow from the airports. */
 @Composable
@@ -99,39 +244,23 @@ fun FlightEditorSheet(
     val airports = LocalAirports.current
     val context = LocalContext.current
     val today = LocalDate.now()
-    var number by rememberSaveable { mutableStateOf(initial?.number?.let(Airlines::format).orEmpty()) }
-    var origin by rememberSaveable { mutableStateOf(initial?.origin) }
-    var destination by rememberSaveable { mutableStateOf(initial?.destination) }
-    var date by rememberSaveable { mutableStateOf(initial?.departureDate) }
-    var dayShift by rememberSaveable { mutableIntStateOf(initial?.let { ChronoUnit.DAYS.between(it.departureDate, it.arrivalDate).toInt() } ?: 0) }
-    var departs by rememberSaveable { mutableStateOf(initial?.departureMinute) }
-    var arrives by rememberSaveable { mutableStateOf(initial?.arrivalMinute) }
-    var note by rememberSaveable { mutableStateOf(initial?.note.orEmpty()) }
+    val form = rememberSaveable(saver = FlightForm.Saver) { FlightForm(initial) }
+    // A new flight may come with its date (added from a day) and nothing else.
+    val saved = initial?.takeIf { it.id != 0L }
     var picking by remember { mutableStateOf<String?>(null) }
     var pickingDate by remember { mutableStateOf(false) }
     var pickingTime by remember { mutableStateOf<String?>(null) }
-    var pasteMessage by remember { mutableStateOf<String?>(null) }
+    var pasted by remember { mutableStateOf<PasteResult?>(null) }
     var impact by remember { mutableStateOf<List<RuleStatus>>(emptyList()) }
 
-    val from = origin?.let { airports?.get(it) }
-    val to = destination?.let { airports?.get(it) }
-    val draft = if (from != null && to != null && date != null && from.code != to.code) {
-        Flight(
-            id = initial?.id ?: 0,
-            number = number.filter { it.isLetterOrDigit() }.uppercase(),
-            origin = from.code,
-            destination = to.code,
-            originCountry = from.country,
-            destinationCountry = to.country,
-            departureDate = date!!,
-            arrivalDate = date!!.plusDays(dayShift.toLong()),
-            departureMinute = departs,
-            arrivalMinute = arrives,
-            note = note.trim(),
-        )
-    } else {
-        null
+    if (saved != null) {
+        // A boarding pass attached below fills the saved flight in; the open form follows.
+        val flights by context.container.repository.flights.collectAsState(initial = emptyList())
+        val current = flights.firstOrNull { it.id == saved.id }
+        LaunchedEffect(current) { current?.let(form::follow) }
     }
+
+    val draft = form.draft(airports)
     LaunchedEffect(draft?.origin, draft?.destination, draft?.departureDate, draft?.arrivalDate) {
         impact = if (draft == null) emptyList() else {
             delay(150)
@@ -144,162 +273,61 @@ fun FlightEditorSheet(
             ?.getItemAt(0)?.coerceToText(context)?.toString()
         val directory = airports
         if (text.isNullOrBlank() || directory == null) {
-            pasteMessage = "Copy a booking confirmation or boarding pass text first"
+            pasted = PasteResult("Copy the text of a boarding pass or booking email first.", filled = false)
             return
         }
         val guess = FlightText.parse(text, directory, today)
-        if (guess.isEmpty) {
-            pasteMessage = "No flight found in the copied text"
+        val booking = BookingText.read(text, today)
+        if (guess.isEmpty && booking.isEmpty) {
+            pasted = PasteResult("No flight found in the copied text.", filled = false)
             return
         }
-        guess.number?.let { number = it }
-        guess.origin?.let { origin = it }
-        guess.destination?.let { destination = it }
-        guess.date?.let { date = it }
-        pasteMessage = "Filled in from the copied text. Check the details."
+        guess.number?.let { form.number = it }
+        guess.origin?.let { form.origin = it }
+        guess.destination?.let { form.destination = it }
+        guess.date?.let { form.date = it }
+        booking.reference.ifEmpty { null }?.let { form.reference = it }
+        booking.passenger.ifEmpty { null }?.let { form.passenger = it }
+        booking.seat.ifEmpty { null }?.let { form.seat = it }
+        pasted = PasteResult("Filled in from the copied text. Check the details.", filled = true)
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberBottomSheetState(SheetValue.Hidden, setOf(SheetValue.Hidden, SheetValue.Expanded))) {
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 20.dp).padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (initial == null) "Add a flight" else "Edit flight", style = MaterialTheme.typography.headlineSmallEmphasized, modifier = Modifier.weight(1f))
-                FilledTonalButton(onClick = ::paste) {
-                    Icon(Icons.Rounded.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Paste")
-                }
-            }
-            AnimatedVisibility(pasteMessage != null) {
-                Text(pasteMessage.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            OutlinedTextField(
-                value = number,
-                onValueChange = { number = it.uppercase().take(8) },
-                label = { Text("Flight number (optional)") },
-                placeholder = { Text("TP 1234") },
-                supportingText = Airlines.name(number)?.let { { Text(it) } },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            Box {
-                Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
-                    AirportRow(0, "From", from, Icons.Rounded.FlightTakeoff) { picking = "from" }
-                    AirportRow(1, "To", to, Icons.Rounded.FlightLand) { picking = "to" }
-                }
-                FilledTonalIconButton(
-                    onClick = {
-                        val swap = origin
-                        origin = destination
-                        destination = swap
-                    },
-                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
-                ) { Icon(Icons.Rounded.SwapVert, contentDescription = "Swap airports") }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
-                SegmentedListItem(
-                    colors = segmentedColors(onSheet = true),
-                    verticalAlignment = Alignment.CenterVertically,
-                    onClick = { pickingDate = true },
-                    shapes = ListItemDefaults.segmentedShapes(0, 3),
-                    leadingContent = { ShapeIcon(Icons.Rounded.Event) },
-                    overlineContent = { Text("Date") },
-                ) { Text(date?.let(Format::long) ?: "Choose the day it leaves", style = MaterialTheme.typography.titleMedium) }
-                TimeRow(1, "Departs", departs, onPick = { pickingTime = "departs" }, onClear = { departs = null })
-                TimeRow(2, "Arrives", arrives, onPick = { pickingTime = "arrives" }, onClear = { arrives = null })
-            }
-            Text("Lands", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0 to "Same day", 1 to "Next day", 2 to "2 days later", -1 to "Day before").forEach { (shift, label) ->
-                    FilterChip(selected = dayShift == shift, onClick = { dayShift = shift }, label = { Text(label) })
-                }
-            }
-            OutlinedTextField(
-                value = note,
-                onValueChange = { note = it },
-                label = { Text("Note (optional)") },
-                singleLine = true,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            if (draft != null) {
-                Text(
-                    if (draft.originCountry == draft.destinationCountry) {
-                        "A domestic flight in ${Countries.name(draft.originCountry)}."
-                    } else if (draft.departureDate == draft.arrivalDate) {
-                        "${Format.short(draft.departureDate)} counts as a travel day in ${Countries.name(draft.originCountry)} and ${Countries.name(draft.destinationCountry)}."
-                    } else {
-                        "${Countries.name(draft.originCountry)} on ${Format.short(draft.departureDate)}, ${Countries.name(draft.destinationCountry)} on ${Format.short(draft.arrivalDate)}."
-                    } + " The days until your next flight out of ${Countries.name(draft.destinationCountry)} are planned there.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else if (from != null && to != null && from.code == to.code) {
-                Text("From and to are the same airport.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-            }
-            AnimatedVisibility(impact.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("With this flight", style = MaterialTheme.typography.titleMedium)
-                    impact.forEach { status ->
-                        val forecast = status.forecast ?: return@forEach
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                when (forecast.level) {
-                                    Level.GOOD -> Icons.Rounded.CheckCircle
-                                    Level.CAUTION -> Icons.Rounded.WarningAmber
-                                    Level.ALERT -> Icons.Rounded.ErrorOutline
-                                },
-                                contentDescription = null,
-                                tint = levelColor(forecast.level),
-                                modifier = Modifier.size(22.dp),
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text(status.rule.name, style = MaterialTheme.typography.labelLarge)
-                                Text(forecast.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            }
-
+        FlightEditorContent(
+            form = form,
+            isNew = saved == null,
+            impact = impact,
+            pasted = pasted,
+            onPaste = ::paste,
+            onPickAirport = { picking = it },
+            onPickDate = { pickingDate = true },
+            onPickTime = { pickingTime = it },
+            onSave = onSave,
+            onDelete = saved?.let { { onDelete(it) } },
             // A saved flight can gain its boarding pass as evidence at any time.
-            if (initial != null && initial.id != 0L) FlightEvidence(initial)
-
-            Spacer(Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (initial != null) OutlinedButton(onClick = { onDelete(initial) }) { Text("Delete") }
-                Spacer(Modifier.weight(1f))
-                Button(onClick = { draft?.let(onSave) }, enabled = draft != null) { Text(if (initial == null) "Add flight" else "Save") }
-            }
-        }
+            evidence = saved?.let { { FlightEvidence(it) } },
+            modifier = Modifier.imePadding(),
+        )
     }
 
     picking?.let { which ->
         AirportPickerSheet(
-            title = if (which == "from") "Flying from" else "Flying to",
+            title = if (which == FROM) "Flying from" else "Flying to",
             recent = recentAirports,
             onDismiss = { picking = null },
             onPick = {
-                if (which == "from") origin = it.code else destination = it.code
+                if (which == FROM) form.origin = it.code else form.destination = it.code
                 picking = null
             },
         )
     }
     if (pickingDate) {
-        val state = rememberDatePickerState(initialSelectedDateMillis = (date ?: today).let(Format::toPickerMillis))
+        val state = rememberDatePickerState(initialSelectedDateMillis = (form.date ?: today).let(Format::toPickerMillis))
         DatePickerDialog(
             onDismissRequest = { pickingDate = false },
             confirmButton = {
                 TextButton(onClick = {
-                    state.selectedDateMillis?.let { date = Format.fromPickerMillis(it) }
+                    state.selectedDateMillis?.let { form.date = Format.fromPickerMillis(it) }
                     pickingDate = false
                 }) { Text("Done") }
             },
@@ -307,15 +335,15 @@ fun FlightEditorSheet(
         ) { DatePicker(state) }
     }
     pickingTime?.let { which ->
-        val current = if (which == "departs") departs else arrives
+        val current = if (which == DEPARTS) form.departs else form.arrives
         val state = rememberTimePickerState(initialHour = (current ?: 12 * 60) / 60, initialMinute = (current ?: 0) % 60)
         TimePickerDialog(
             onDismissRequest = { pickingTime = null },
-            title = { Text(if (which == "departs") "Departs (local time)" else "Arrives (local time)") },
+            title = { Text(if (which == DEPARTS) "Departs (local time)" else "Arrives (local time)") },
             confirmButton = {
                 TextButton(onClick = {
                     val minute = state.hour * 60 + state.minute
-                    if (which == "departs") departs = minute else arrives = minute
+                    if (which == DEPARTS) form.departs = minute else form.arrives = minute
                     pickingTime = null
                 }) { Text("Done") }
             },
@@ -324,8 +352,351 @@ fun FlightEditorSheet(
     }
 }
 
+private const val FROM = "from"
+private const val TO = "to"
+private const val DEPARTS = "departs"
+private const val ARRIVES = "arrives"
+
+/**
+ * The flight editor's content: the flight at a glance, then a section each for where, when,
+ * the flight's own details, a note and its evidence; what it does to the days and rules sits
+ * by the Save button, which stays in view while the rest scrolls.
+ */
 @Composable
-private fun AirportRow(index: Int, label: String, airport: Airport?, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+fun FlightEditorContent(
+    form: FlightForm,
+    isNew: Boolean,
+    impact: List<RuleStatus>,
+    pasted: PasteResult?,
+    onPaste: () -> Unit,
+    onPickAirport: (String) -> Unit,
+    onPickDate: () -> Unit,
+    onPickTime: (String) -> Unit,
+    onSave: (Flight) -> Unit,
+    onDelete: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    evidence: (@Composable () -> Unit)? = null,
+) {
+    val airports = LocalAirports.current
+    val from = form.origin?.let { airports?.get(it) }
+    val to = form.destination?.let { airports?.get(it) }
+    val draft = form.draft(airports)
+    var confirmDelete by remember { mutableStateOf(false) }
+    Column(modifier) {
+        Column(
+            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (isNew) "Add a flight" else "Edit flight", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f))
+                if (onDelete != null) {
+                    IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, contentDescription = "Delete flight") }
+                }
+            }
+            // Nothing to sum up until an airport or the date is chosen.
+            if (from != null || to != null || form.date != null) FlightHeader(form, from, to)
+            PasteAction(pasted, onPaste)
+
+            Section("Route") {
+                Box {
+                    Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+                        AirportRow(0, "From", from, Icons.Rounded.FlightTakeoff) { onPickAirport(FROM) }
+                        AirportRow(1, "To", to, Icons.Rounded.FlightLand) { onPickAirport(TO) }
+                    }
+                    FilledTonalIconButton(
+                        onClick = {
+                            val swap = form.origin
+                            form.origin = form.destination
+                            form.destination = swap
+                        },
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
+                    ) { Icon(Icons.Rounded.SwapVert, contentDescription = "Swap airports") }
+                }
+                if (from != null && to != null && from.code == to.code) {
+                    Text("From and to are the same airport.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
+            Section("When") {
+                Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+                    SegmentedListItem(
+                        colors = segmentedColors(onSheet = true),
+                        verticalAlignment = Alignment.CenterVertically,
+                        onClick = onPickDate,
+                        shapes = ListItemDefaults.segmentedShapes(0, 3),
+                        leadingContent = { ShapeIcon(Icons.Rounded.Event) },
+                        overlineContent = { Text("Date") },
+                    ) { Text(form.date?.let(Format::long) ?: "Choose the day it leaves", style = MaterialTheme.typography.titleMedium) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+                        TimeTile("Departs", form.departs, Modifier.weight(1f), onPick = { onPickTime(DEPARTS) }, onClear = { form.departs = null })
+                        TimeTile("Arrives", form.arrives, Modifier.weight(1f), onPick = { onPickTime(ARRIVES) }, onClear = { form.arrives = null })
+                    }
+                    LandsRow(form)
+                }
+            }
+
+            Section("Flight") { FlightFields(form) }
+
+            Section("Note") {
+                OutlinedTextField(
+                    value = form.note,
+                    onValueChange = { form.note = it },
+                    placeholder = { Text("Anything worth remembering") },
+                    singleLine = true,
+                    shape = FIELD,
+                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Note" },
+                )
+            }
+
+            Section("Evidence") {
+                if (evidence != null) {
+                    evidence()
+                } else {
+                    Text(
+                        "Add its boarding pass once the flight is saved.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (draft != null) FlightEffect(draft, impact)
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp).navigationBarsPadding(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                when {
+                    draft != null -> ""
+                    from != null && to != null && from.code == to.code -> "Choose two different airports."
+                    from == null || to == null -> "Choose both airports" + if (form.date == null) " and the date." else "."
+                    else -> "Choose the date."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Button(onClick = { draft?.let(onSave) }, enabled = draft != null) { Text(if (isNew) "Add flight" else "Save") }
+        }
+    }
+
+    if (confirmDelete && onDelete != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete this flight?") },
+            text = { Text("Its days are counted again from what was recorded. Evidence kept for it stays.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    onDelete()
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+private val FIELD = RoundedCornerShape(16.dp)
+
+/** A titled group of the editor's fields. */
+@Composable
+private fun Section(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionHeader(title, Modifier.padding(top = 0.dp))
+        content()
+    }
+}
+
+/**
+ * The flight at a glance: the route as two big codes with their cities, then the date and
+ * times, and the number with its airline. Empty parts read as what's still to choose.
+ */
+@Composable
+private fun FlightHeader(form: FlightForm, from: Airport?, to: Airport?) {
+    // Only the gap between the days matters for the times, so any day stands in for a missing one.
+    val day = form.date ?: LocalDate.of(2000, 1, 1)
+    val times = flightTimes(
+        Flight(
+            number = "", origin = "", destination = "", originCountry = "", destinationCountry = "",
+            departureDate = day, arrivalDate = day.plusDays(form.dayShift.toLong()),
+            departureMinute = form.departs, arrivalMinute = form.arrives,
+        ),
+    )
+    val number = Airlines.format(form.number).ifBlank { null }
+    val dateLine = form.date?.let(Format::long) ?: "No date yet"
+    val detailLine = listOfNotNull(times, number, number?.let { Airlines.name(form.number) }).joinToString(" · ").ifEmpty { null }
+    Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                HeaderAirport(from, "From", Alignment.Start, Modifier.weight(1f))
+                Icon(Icons.Rounded.Flight, contentDescription = "to", modifier = Modifier.padding(horizontal = 8.dp).size(28.dp).rotate(90f))
+                HeaderAirport(to, "To", Alignment.End, Modifier.weight(1f))
+            }
+            Column {
+                Text(dateLine, style = MaterialTheme.typography.titleMedium)
+                detailLine?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeaderAirport(airport: Airport?, missing: String, alignment: Alignment.Horizontal, modifier: Modifier) {
+    val align = if (alignment == Alignment.End) TextAlign.End else TextAlign.Start
+    Column(modifier, horizontalAlignment = alignment) {
+        Text(
+            airport?.code ?: "···",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (airport == null) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+        Text(
+            airport?.let { "${Countries.flag(it.country)} ${it.place}" } ?: missing,
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = align,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** One way to fill the form from a boarding pass or booking email, and what it found. */
+@Composable
+private fun PasteAction(pasted: PasteResult?, onPaste: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedButton(onClick = onPaste, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Rounded.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Paste a boarding pass or booking")
+        }
+        pasted?.let {
+            Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (it.filled) Icons.Rounded.CheckCircle else Icons.Rounded.ErrorOutline,
+                    contentDescription = null,
+                    tint = if (it.filled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(it.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/**
+ * Number, booking reference, seat and passenger. The booking ones are worth keeping as proof
+ * of who flew but rarely typed, so while all three are empty they wait behind one button.
+ */
+@Composable
+private fun FlightFields(form: FlightForm) {
+    val known = form.reference.isNotBlank() || form.passenger.isNotBlank() || form.seat.isNotBlank()
+    var open by rememberSaveable { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(
+            value = form.number,
+            onValueChange = { form.number = it.uppercase().take(8) },
+            label = { Text("Flight number") },
+            placeholder = { Text("TP 1234") },
+            supportingText = Airlines.name(form.number)?.let { { Text(it) } },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+            shape = FIELD,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        AnimatedVisibility(open || known) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = form.reference,
+                        onValueChange = { form.reference = it.uppercase().take(8) },
+                        label = { Text("Booking reference") },
+                        placeholder = { Text("ABC123") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+                        shape = FIELD,
+                        modifier = Modifier.weight(1.6f),
+                    )
+                    OutlinedTextField(
+                        value = form.seat,
+                        onValueChange = { form.seat = it.uppercase().take(4) },
+                        label = { Text("Seat") },
+                        placeholder = { Text("14C") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+                        shape = FIELD,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                OutlinedTextField(
+                    value = form.passenger,
+                    onValueChange = { form.passenger = it },
+                    label = { Text("Passenger") },
+                    placeholder = { Text("As on the boarding pass") },
+                    supportingText = form.passenger.takeIf { '/' in it }?.let { { Text(passengerName(it)) } },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+                    shape = FIELD,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        if (!known && !open) {
+            TextButton(onClick = { open = true }) {
+                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Booking reference, seat, passenger")
+            }
+        }
+    }
+}
+
+/**
+ * What saving would do: the travel days in each country and each rule's forecast with the
+ * flight, so a flight that breaks a limit is caught before it's booked.
+ */
+@Composable
+private fun FlightEffect(draft: Flight, impact: List<RuleStatus>) {
+    val origin = Countries.name(draft.originCountry)
+    val destination = Countries.name(draft.destinationCountry)
+    val days = when {
+        draft.originCountry == draft.destinationCountry -> "A domestic flight in $origin."
+        draft.departureDate == draft.arrivalDate -> "${Format.short(draft.departureDate)} is a travel day in $origin and $destination."
+        else -> "$origin on ${Format.short(draft.departureDate)}, $destination on ${Format.short(draft.arrivalDate)}."
+    }
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("With this flight", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "$days Later days are planned in $destination until your next flight.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            impact.forEach { status ->
+                val forecast = status.forecast ?: return@forEach
+                Row(verticalAlignment = Alignment.Top) {
+                    LevelIcon(forecast.level, Modifier.padding(top = 1.dp), size = 18.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(fontWeight = FontWeight.Medium)) { append(status.rule.name) }
+                            append(" · ")
+                            append(forecast.text)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AirportRow(index: Int, label: String, airport: Airport?, icon: ImageVector, onClick: () -> Unit) {
     SegmentedListItem(
         colors = segmentedColors(onSheet = true),
         verticalAlignment = Alignment.CenterVertically,
@@ -333,7 +704,7 @@ private fun AirportRow(index: Int, label: String, airport: Airport?, icon: andro
         shapes = ListItemDefaults.segmentedShapes(index, 2),
         leadingContent = { ShapeIcon(icon) },
         overlineContent = { Text(label) },
-        supportingContent = airport?.let { { Text("${Countries.flag(it.country)} ${it.name}", maxLines = 1) } },
+        supportingContent = airport?.let { { Text("${Countries.flag(it.country)} ${it.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) } },
         // Room on the right for the swap button.
         contentPadding = PaddingValues(start = 16.dp, end = 72.dp, top = 12.dp, bottom = 12.dp),
     ) {
@@ -345,21 +716,57 @@ private fun AirportRow(index: Int, label: String, airport: Airport?, icon: andro
     }
 }
 
+private val LANDS = listOf(0 to "Same day", 1 to "Next day", 2 to "2 days later", -1 to "Day before")
+
+/** The day it lands, relative to the day it leaves; a menu, as anything but "Same day" is rare. */
 @Composable
-private fun TimeRow(index: Int, label: String, minute: Int?, onPick: () -> Unit, onClear: () -> Unit) {
-    SegmentedListItem(
-        colors = segmentedColors(onSheet = true),
-        verticalAlignment = Alignment.CenterVertically,
-        onClick = onPick,
-        shapes = ListItemDefaults.segmentedShapes(index, 3),
-        leadingContent = { ShapeIcon(Icons.Rounded.Schedule) },
-        overlineContent = { Text("$label, local time") },
-        trailingContent = if (minute != null) {
-            { IconButton(onClick = onClear) { Icon(Icons.Rounded.Close, contentDescription = "Clear time") } }
-        } else {
-            null
-        },
-    ) { Text(formatMinute(minute) ?: "Optional", style = MaterialTheme.typography.titleMedium) }
+private fun LandsRow(form: FlightForm) {
+    var open by remember { mutableStateOf(false) }
+    val label = LANDS.firstOrNull { it.first == form.dayShift }?.second ?: "${form.dayShift} days later"
+    val day = form.date?.plusDays(form.dayShift.toLong())
+    Box {
+        SegmentedListItem(
+            colors = segmentedColors(onSheet = true),
+            verticalAlignment = Alignment.CenterVertically,
+            onClick = { open = true },
+            shapes = ListItemDefaults.segmentedShapes(2, 3),
+            leadingContent = { ShapeIcon(Icons.Rounded.FlightLand) },
+            overlineContent = { Text("Lands") },
+            trailingContent = { Icon(Icons.Rounded.ExpandMore, contentDescription = null) },
+        ) { Text(listOfNotNull(label, day?.let { Format.short(it) }).joinToString(" · "), style = MaterialTheme.typography.titleMedium) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            LANDS.forEach { (shift, text) ->
+                DropdownMenuItem(
+                    text = { Text(text) },
+                    onClick = {
+                        form.dayShift = shift
+                        open = false
+                    },
+                    trailingIcon = if (shift == form.dayShift) ({ Icon(Icons.Rounded.Check, contentDescription = "Chosen") }) else null,
+                )
+            }
+        }
+    }
+}
+
+/** Half of the row under the date: one local time, or "Add time" while it's unknown. */
+@Composable
+private fun TimeTile(label: String, minute: Int?, modifier: Modifier, onPick: () -> Unit, onClear: () -> Unit) {
+    Surface(onClick = onPick, shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = modifier) {
+        Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp).height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("$label, local", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    formatMinute(minute) ?: "Add time",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (minute == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            if (minute != null) {
+                IconButton(onClick = onClear) { Icon(Icons.Rounded.Close, contentDescription = "Clear ${label.lowercase()} time") }
+            }
+        }
+    }
 }
 
 /** Search by code, city, airport name or country; recent airports first while the field is empty. */
