@@ -494,6 +494,8 @@ class Repository(
         val current = db.flights().all().firstOrNull { it.id == flight.id } ?: return
         val updated = current.copy(
             number = current.number.ifBlank { found.number.filter { it.isLetterOrDigit() } },
+            departureMinute = current.departureMinute ?: found.departureMinute,
+            arrivalMinute = current.arrivalMinute ?: found.arrivalMinute,
             reference = current.reference.ifBlank { found.reference.orEmpty() },
             passenger = current.passenger.ifBlank { found.passenger.orEmpty() },
             seat = current.seat.ifBlank { found.seat.orEmpty() },

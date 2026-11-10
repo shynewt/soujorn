@@ -11,10 +11,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.NoteAdd
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -39,6 +39,7 @@ import kotlinx.coroutines.launch
  * What backs up a saved flight in the evidence pack, and a way to add its boarding pass
  * afterwards: a PDF, a screenshot or a Wallet pass. The same file isn't kept twice, and a pass
  * for another flight is turned away. Each document opens the same sheet as in the Evidence tab.
+ * A pass that names the booking reference, passenger or seat fills them in on the flight.
  */
 @Composable
 fun FlightEvidence(flight: Flight) {
@@ -56,7 +57,7 @@ fun FlightEvidence(flight: Flight) {
         message = null
         scope.launch {
             message = when (val result = runCatching { container.keeper.attach(flight, uri) }.getOrNull()) {
-                is EvidenceKeeper.Attached.Kept -> "Kept for this flight: it's in its days' evidence and the evidence pack."
+                is EvidenceKeeper.Attached.Kept -> "Kept for this flight and its days."
                 EvidenceKeeper.Attached.AlreadyKept -> "That file is already kept for this flight."
                 is EvidenceKeeper.Attached.OtherFlight -> "That's the pass for ${result.found}, not this flight, so it wasn't added."
                 null -> "Couldn't read that file."
@@ -64,28 +65,35 @@ fun FlightEvidence(flight: Flight) {
             busy = false
         }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Evidence", style = MaterialTheme.typography.titleMedium)
+    FlightEvidenceList(
+        kept = kept,
+        busy = busy,
+        message = message,
+        onAdd = { pick.launch(arrayOf("application/pdf", "image/*", "application/vnd.apple.pkpass", "application/octet-stream")) },
+        onOpen = { open = it },
+    )
+    open?.let { DocumentSheet(it, flight = null, onDismiss = { open = null }) }
+}
+
+/** The flight's kept documents and the button to add its boarding pass; drawn apart from loading them. */
+@Composable
+fun FlightEvidenceList(kept: List<Kept>, busy: Boolean, message: String?, onAdd: () -> Unit, onOpen: (Kept) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (kept.isEmpty()) {
             Text(
-                "Nothing kept for this flight yet. Its boarding pass makes its days documented in the evidence pack.",
-                style = MaterialTheme.typography.bodySmall,
+                "Its boarding pass makes both days documented.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
-            kept.forEachIndexed { index, item -> DocumentRow(item, index, kept.size, onClick = { open = item }, onSheet = true) }
+            kept.forEachIndexed { index, item -> DocumentRow(item, index, kept.size, onClick = { onOpen(item) }, onSheet = true) }
         }
-        OutlinedButton(
-            onClick = { pick.launch(arrayOf("application/pdf", "image/*", "application/vnd.apple.pkpass", "application/octet-stream")) },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
+        FilledTonalButton(onClick = onAdd, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Rounded.NoteAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(if (busy) "Reading…" else "Add boarding pass")
         }
         message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp)) }
     }
-    open?.let { DocumentSheet(it, flight = null, onDismiss = { open = null }) }
 }
