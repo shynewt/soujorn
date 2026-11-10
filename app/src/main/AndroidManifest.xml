@@ -125,6 +125,21 @@
             </intent-filter>
         </activity-alias>
 
+        <!--
+            Opens a kept evidence file (a bill, a lease, a boarding pass) in another app to read
+            it. Not exported: each file is lent with a one-off read grant, and only the evidence
+            folder can be shared, never the database or settings.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/evidence_paths" />
+        </provider>
+
         <receiver
             android:name=".tracking.TimeZoneReceiver"
             android:exported="false">

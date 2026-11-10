@@ -362,6 +362,11 @@ class Repository(
         document.file?.takeIf { db.documents().usingFile(it) == 0 }?.let { name -> evidenceDir?.let { File(it, name).delete() } }
     }
 
+    /** Saves changes to a kept document: its title, note, dates or country. Its file stays as it is. */
+    suspend fun updateDocument(document: Document) {
+        db.documents().upsert(document)
+    }
+
     suspend fun documentsBetween(from: LocalDate, to: LocalDate): List<Document> = db.documents().between(from, to)
 
     suspend fun recordedDays(from: LocalDate, to: LocalDate): Set<LocalDate> = db.presence().daysBetween(from, to).toSet()

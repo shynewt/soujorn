@@ -9,6 +9,9 @@ import android.provider.MediaStore
 import android.util.Size
 import app.sojourn.data.db.Document
 import app.sojourn.data.db.DocumentKind
+import app.sojourn.data.db.EvidenceGroup
+import app.sojourn.data.db.Flight
+import app.sojourn.data.flights.Airlines
 import app.sojourn.domain.DayBook
 import app.sojourn.domain.DayKind
 import app.sojourn.domain.Evidence
@@ -64,20 +67,36 @@ class EvidenceStore(private val context: Context, private val dir: File) {
         return sha.digest().joinToString("") { "%02x".format(it) }
     }
 
-    /** The pack's folder for a kind: "boarding-passes", "utility-bills"… */
+    /** The pack's folder for a kind: "boarding-passes", "utility-bills", "work"… */
     private fun folder(kind: DocumentKind): String = when (kind) {
+        DocumentKind.PHOTO -> "photos"
         DocumentKind.BOARDING_PASS -> "boarding-passes"
+        DocumentKind.CALENDAR_EVENT -> "calendar"
         DocumentKind.BOOKING -> "bookings"
-        else -> kind.name.lowercase().replace('_', '-') + "s"
+        DocumentKind.TICKET -> "tickets"
+        DocumentKind.STAY -> "stays"
+        DocumentKind.CARD_STATEMENT -> "card-statements"
+        DocumentKind.MEDICAL -> "medical"
+        DocumentKind.APPOINTMENT -> "appointments"
+        DocumentKind.RECEIPT -> "receipts"
+        DocumentKind.LEASE -> "home"
+        DocumentKind.UTILITY_BILL -> "utility-bills"
+        DocumentKind.RESIDENCE_CERTIFICATE -> "residence-certificates"
+        DocumentKind.TAX_RETURN -> "tax-records"
+        DocumentKind.WORK -> "work"
+        DocumentKind.REGISTRATION -> "registration"
+        DocumentKind.FAMILY -> "family"
+        DocumentKind.OTHER -> "other"
     }
 
     /** What's in a year's pack, and what couldn't be copied. */
     data class PackResult(val days: Int, val files: Int, val missing: List<String>)
 
     /**
-     * Writes [year]'s evidence pack to [out] as a zip: a summary page to read or print, every
-     * day as CSV with its sources, the calendar events as one .ics, booking texts, boarding
-     * passes and one photo per day and country, copied from the gallery with their dates and
+     * Writes [year]'s evidence pack to [out] as a zip: a summary page to read or print, listing
+     * every document by group and each flight with its documents; every day as CSV with its
+     * sources; the calendar events as one .ics; and every kept file (boarding passes, bills,
+     * a lease…) in a folder per kind. Photos are copied from the gallery with their dates and
      * locations as the camera saved them.
      */
     suspend fun writePack(out: OutputStream, year: Int, book: DayBook, documents: List<Document>): PackResult = withContext(Dispatchers.IO) {
@@ -98,7 +117,8 @@ class EvidenceStore(private val context: Context, private val dir: File) {
             }
             val counters = HashMap<String, Int>()
             fun nameFor(doc: Document, folder: String, ext: String): String {
-                val base = "$folder/${doc.day}_${doc.country}"
+                val dates = doc.until?.takeIf { it != doc.day }?.let { "${doc.day}_to_$it" } ?: "${doc.day}"
+                val base = "$folder/${dates}_${doc.country}"
                 val n = (counters[base] ?: 0) + 1
                 counters[base] = n
                 return if (n == 1) "$base.$ext" else "${base}_$n.$ext"
@@ -167,7 +187,7 @@ class EvidenceStore(private val context: Context, private val dir: File) {
 
     private fun daysCsv(book: DayBook, from: LocalDate, to: LocalDate, docs: List<Document>, paths: Map<Long, String>): String = buildString {
         appendLine("date,country_code,country,counted,evidence,sources,documents")
-        val byDay = docs.groupBy { it.day to it.country }
+        val byDay = docs.filter { it.until == null || it.until == it.day }.groupBy { it.day to it.country }
         for (day in book.between(from, to)) {
             if (day.kind == DayKind.PLANNED) continue
             for (country in day.countries) {
@@ -181,8 +201,10 @@ class EvidenceStore(private val context: Context, private val dir: File) {
     }
 
     private fun indexHtml(year: Int, book: DayBook, from: LocalDate, to: LocalDate, docs: List<Document>, paths: Map<Long, String>, missing: List<String>): String {
+        val flights = book.flights.associateBy { it.id }
         val summary = book.summary(from, to)
-        val byDay = docs.groupBy { it.day to it.country }
+        // Period documents back the ties, not single days, so they're listed by group only.
+        val byDay = docs.filter { it.until == null || it.until == it.day }.groupBy { it.day to it.country }
         val made = LocalDateTime.now().format(DateTimeFormatter.ofPattern("d MMM yyyy HH:mm"))
         return buildString {
             append("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\">")
@@ -210,6 +232,8 @@ class EvidenceStore(private val context: Context, private val dir: File) {
                 append("</ul>")
             }
 
+            documentsHtml(docs, flights, paths)
+
             append("<h2>Every day</h2><table><tr><th>Date</th><th>Country</th><th>Counted</th><th>Evidence</th><th>Documents</th></tr>")
             for (day in book.between(from, to)) {
                 if (day.kind == DayKind.PLANNED) continue
@@ -229,11 +253,75 @@ class EvidenceStore(private val context: Context, private val dir: File) {
         }
     }
 
+    /**
+     * The documents section of the summary page: flights first, each with its number, route,
+     * booking reference and the documents that back it up, then every other document by group
+     * with its kind, date or period, country, strength and file. A file kept for both of a
+     * flight's days is listed once.
+     */
+    private fun StringBuilder.documentsHtml(docs: List<Document>, flights: Map<Long, Flight>, paths: Map<Long, String>) {
+        if (docs.isEmpty()) return
+        append("<h2>Documents</h2>")
+        val (forFlights, others) = docs.partition { it.flightId != null && it.flightId in flights }
+        if (forFlights.isNotEmpty()) {
+            append("<h3>Flights</h3><table><tr><th>Date</th><th>Flight</th><th>Route</th><th>Booking reference</th><th>Documents</th></tr>")
+            forFlights.groupBy { it.flightId!! }.entries.sortedBy { flights.getValue(it.key).departureDate }.forEach { (id, kept) ->
+                val flight = flights.getValue(id)
+                val route = "${flight.origin} (${Countries.name(flight.originCountry)}) → ${flight.destination} (${Countries.name(flight.destinationCountry)})"
+                val links = kept.distinctBy { paths[it.id] ?: it.id.toString() }.joinToString("<br>") { link(it, paths) + " <span class=\"muted\">${esc(it.kind.strength.label)}</span>" }
+                append("<tr><td>${flight.departureDate}</td><td>${esc(Airlines.format(flight.number))}</td><td>${esc(route)}</td>")
+                append("<td>${esc(flight.reference)}</td><td>$links</td></tr>")
+            }
+            append("</table>")
+        }
+        for (group in EvidenceGroup.entries) {
+            val inGroup = others.filter { it.kind.group == group }.distinctBy { paths[it.id]?.let { p -> p to it.kind } ?: it.id }
+            if (inGroup.isEmpty()) continue
+            append("<h3>${esc(group.label)}</h3><table><tr><th>Date or period</th><th>Kind</th><th>Country</th><th>Strength</th><th>Document</th><th>Note</th></tr>")
+            for (doc in inGroup.sortedWith(compareBy({ it.day }, { it.kind }))) {
+                val dates = doc.until?.takeIf { it != doc.day }?.let { "${doc.day} to $it" } ?: doc.day.toString()
+                append("<tr><td>$dates</td><td>${esc(doc.kind.label)}</td><td>${esc(Countries.name(doc.country))}</td><td>${esc(doc.kind.strength.label)}</td>")
+                append("<td>${link(doc, paths)}</td><td>${esc(doc.note)}</td></tr>")
+            }
+            append("</table>")
+        }
+        append("<p class=\"muted\">Strong: third-party proof of where you were that day. Medium: indirect, or covering a period. ")
+        append("Supporting: backs up other evidence. Ties: shows a home, work or family there rather than days.</p>")
+    }
+
+    private fun link(doc: Document, paths: Map<Long, String>): String =
+        paths[doc.id]?.let { "<a href=\"${esc(it)}\">${esc(doc.title)}</a>" } ?: esc(doc.title)
+
     private fun esc(text: String) = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
     private fun csv(value: String) = if (value.any { it == ',' || it == '"' }) "\"${value.replace("\"", "\"\"")}\"" else value
 
     companion object {
+        /** What a kept file is, by its extension, for opening it in another app. */
+        fun mimeType(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+            "pdf" -> "application/pdf"
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "heic", "heif" -> "image/heif"
+            "pkpass" -> "application/vnd.apple.pkpass"
+            "txt" -> "text/plain"
+            "ics" -> "text/calendar"
+            else -> "application/octet-stream"
+        }
+
+        /** A small picture of a kept image file; null for anything that isn't a picture. */
+        fun thumbnailOf(file: File, px: Int): Bitmap? {
+            if (!mimeType(file.name).startsWith("image/")) return null
+            return runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.path, bounds)
+                var sample = 1
+                while (bounds.outWidth / (sample * 2) >= px && bounds.outHeight / (sample * 2) >= px) sample *= 2
+                BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+            }.getOrNull()
+        }
+
         /** A small picture of a gallery photo, for the day sheet; null if it's gone. */
         fun thumbnail(context: Context, uri: String, px: Int): Bitmap? = runCatching {
             val parsed = Uri.parse(uri)
