@@ -1,6 +1,5 @@
 package app.sojourn.ui.plan
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,19 +8,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DateRange
-import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -42,7 +35,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.sojourn.data.Countries
 import app.sojourn.data.db.Plan
-import app.sojourn.domain.Level
 import app.sojourn.domain.RuleStatus
 import app.sojourn.ui.components.segmentedColors
 import app.sojourn.ui.components.CountryPickerSheet
@@ -50,7 +42,6 @@ import app.sojourn.ui.components.DateRangeDialog
 import app.sojourn.ui.components.FlagBadge
 import app.sojourn.ui.components.Format
 import app.sojourn.ui.components.ShapeIcon
-import app.sojourn.ui.components.levelColor
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
@@ -131,33 +122,7 @@ fun PlanEditorSheet(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            AnimatedVisibility(impact.isNotEmpty()) {
-                Column {
-                    Spacer(Modifier.height(20.dp))
-                    Text("With this stay", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    impact.forEach { status ->
-                        val forecast = status.forecast ?: return@forEach
-                        Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
-                            Icon(
-                                when (forecast.level) {
-                                    Level.GOOD -> Icons.Rounded.CheckCircle
-                                    Level.CAUTION -> Icons.Rounded.WarningAmber
-                                    Level.ALERT -> Icons.Rounded.ErrorOutline
-                                },
-                                contentDescription = null,
-                                tint = levelColor(forecast.level),
-                                modifier = Modifier.size(22.dp),
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text(status.rule.name, style = MaterialTheme.typography.labelLarge)
-                                Text(forecast.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            }
+            RuleImpact("With this stay", impact, Modifier.padding(top = 12.dp))
 
             Spacer(Modifier.height(24.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

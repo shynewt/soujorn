@@ -88,6 +88,10 @@ import androidx.compose.material.icons.rounded.Hotel
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.PersonOff
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.rounded.Verified
+import androidx.compose.ui.text.style.TextOverflow
+import app.sojourn.ui.AppTab
+import app.sojourn.ui.LocalAppActions
 import app.sojourn.ui.appViewModel
 import app.sojourn.ui.components.DateRangeDialog
 import app.sojourn.ui.components.EmptyState
@@ -147,7 +151,7 @@ fun ImportScreen(back: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Import history", style = MaterialTheme.typography.titleLargeEmphasized) },
+                title = { Text("Import", style = MaterialTheme.typography.titleLargeEmphasized) },
                 navigationIcon = {
                     IconButton(onClick = { if (phase is ImportPhase.Idle || phase is ImportPhase.Done) back() else vm.reset() }) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -195,28 +199,7 @@ fun ImportScreen(back: () -> Unit) {
 
                 is ImportPhase.Trips -> TripsReview(current, vm, onAddName = { namesFor = true })
 
-                is ImportPhase.Done -> EmptyState(
-                    icon = Icons.Rounded.Done,
-                    title = when {
-                        current.what != "days" && current.added == 0 && current.evidence > 0 -> "Kept ${current.evidence} as evidence"
-                        current.what != "days" -> "Added ${current.added} ${current.what}"
-                        current.added == 0 && current.backedUp > 0 -> "Backed up ${Format.days(current.backedUp)}"
-                        else -> "Added ${Format.days(current.added)}"
-                    },
-                    body = buildString {
-                        append("They're in your calendar and timeline now, and every count has been updated.")
-                        if (current.backedUp > 0 && current.added > 0) append(" ${Format.days(current.backedUp)} you already had are now backed up by this as evidence.")
-                        else if (current.backedUp > 0) append(" They now count as documented in your evidence.")
-                        if (current.skipped > 0) append(" ${current.skipped} ${if (current.skipped == 1) "flight was" else "flights were"} already saved, so ${if (current.skipped == 1) "it was" else "they were"} left out.")
-                        if (current.evidence > 0) {
-                            append(" ${current.evidence} ${if (current.evidence == 1) "document was" else "documents were"} kept as evidence for ${if (current.added == 0) "flights you already had" else "these days"}: they're in the day sheets and the evidence pack.")
-                        } else if (current.what != "days") {
-                            append(" Their files were already kept as evidence, so nothing was copied again.")
-                        }
-                        if (current.duplicatesRemoved > 0) append(" ${current.duplicatesRemoved} duplicate ${if (current.duplicatesRemoved == 1) "flight" else "flights"} from before ${if (current.duplicatesRemoved == 1) "was" else "were"} merged.")
-                    },
-                    action = { Button(onClick = back) { Text("Done") } },
-                )
+                is ImportPhase.Done -> ImportDone(current, onMore = vm::reset)
             }
         }
     }
@@ -240,6 +223,11 @@ fun ImportScreen(back: () -> Unit) {
     }
 }
 
+/**
+ * Where trips and days can come from, in the order most people have them: calendar flights,
+ * boarding passes, photos, location files. Each says what it keeps as evidence, since an import
+ * is also the quickest way to fill the evidence vault.
+ */
 @Composable
 fun ImportSources(
     range: Pair<LocalDate, LocalDate>,
@@ -251,56 +239,75 @@ fun ImportSources(
     onScreenshots: () -> Unit = {},
     onFolder: () -> Unit = {},
 ) {
-    var help by rememberSaveable { mutableStateOf(false) }
+    val actions = LocalAppActions.current
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            "Fill in where you've been and where you're going. Everything is read on the phone, which Sojourn can't take online, only trips and countries are kept, and you approve each one.",
+            "Fill in where you've been and where you're going. Everything is read on this phone and nothing leaves it; you approve each trip and day before it's added.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp),
         )
+        Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp, end = 8.dp), verticalAlignment = Alignment.Top) {
+                Icon(Icons.Rounded.Verified, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(top = 2.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Imports keep evidence too: each boarding pass, booking and calendar event is kept with its flight, and photos and tracks back up their days.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    TextButton(onClick = { actions.tab(AppTab.EVIDENCE) }) { Text("Open Evidence") }
+                }
+            }
+        }
         if (error != null) {
             Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
                 Text(error, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp))
             }
         }
-        var calendarHelp by rememberSaveable { mutableStateOf(false) }
         SourceCard(
             icon = Icons.Rounded.CalendarMonth,
             shape = MaterialShapes.Cookie6Sided.toShape(),
-            title = "Flights in your calendar",
-            body = "Gmail puts flights from booking emails in Google Calendar, and airlines and TripIt add them too. Sojourn reads them from the calendars on this phone.",
+            title = "Calendar flights",
+            body = "Flights Gmail, airlines and TripIt put in your calendars.",
+            keeps = "Keeps each event as evidence",
+            helpLabel = "Flights missing?",
+            help = listOf(
+                "In Gmail, smart features must be on; in Google Calendar › Settings › Events from Gmail, show events.",
+                "In newer Google Calendar versions, also turn on Settings › General › Share Google Calendar data with other apps.",
+                "Gmail skips emails forwarded from another account; import those flights' boarding passes instead.",
+            ),
         ) {
             Button(onClick = onCalendar, modifier = Modifier.fillMaxWidth()) { Text("Find flights") }
-            TextButton(onClick = { calendarHelp = !calendarHelp }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text(if (calendarHelp) "Hide" else "Flights missing?")
-            }
-            AnimatedVisibility(calendarHelp) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HelpStep(1, "In Gmail, smart features must be on; in Google Calendar › Settings › Events from Gmail, show events.")
-                    HelpStep(2, "In newer Google Calendar versions, also turn on Settings › General › Share Google Calendar data with other apps.")
-                    HelpStep(3, "Gmail skips emails forwarded from another account; share those flights' boarding passes to Sojourn instead.")
-                }
-            }
         }
         SourceCard(
             icon = Icons.Rounded.ConfirmationNumber,
             shape = MaterialShapes.Gem.toShape(),
             title = "Boarding passes",
-            body = "Google Wallet doesn't let other apps read your passes, so take a screenshot of each one. PDF boarding passes and Apple Wallet passes work too: choose many at once, a zip of them, or a whole folder. You pick which to add, copies of the same flight are merged, and every file is kept for the evidence pack.",
+            body = "Screenshots, PDFs, Wallet passes, a zip or a folder.",
+            keeps = "Keeps each file as evidence",
+            helpLabel = "Passes in Google Wallet?",
+            help = listOf(
+                "Google Wallet doesn't let other apps read passes, so open each one and take a screenshot.",
+                "Choose all the screenshots at once. Copies of the same flight are merged into one.",
+            ),
         ) {
             Button(onClick = onScreenshots, modifier = Modifier.fillMaxWidth()) { Text("Choose screenshots") }
-            OutlinedButton(onClick = onFile, modifier = Modifier.fillMaxWidth()) { Text("Choose PDFs, passes or a zip") }
-            OutlinedButton(onClick = onFolder, modifier = Modifier.fillMaxWidth()) { Text("Choose a folder") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onFile, modifier = Modifier.weight(1f)) { Text("Files or a zip") }
+                OutlinedButton(onClick = onFolder, modifier = Modifier.weight(1f)) { Text("A folder") }
+            }
         }
         SourceCard(
             icon = Icons.Rounded.PhotoLibrary,
             shape = MaterialShapes.Cookie9Sided.toShape(),
             title = "Photos",
-            body = "Most photos remember where they were taken.",
+            body = "Where your photos were taken, day by day.",
+            keeps = "Links a photo to each day as evidence",
         ) {
             Surface(onClick = onDates, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -319,19 +326,16 @@ fun ImportSources(
             icon = Icons.Rounded.Route,
             shape = MaterialShapes.Clover4Leaf.toShape(),
             title = "Location files",
-            body = "GPX, TCX, FIT, KML or GeoJSON tracks from Strava, Komoot, Garmin and others, or your Google Timeline export. Zips work too, and so does sharing a file to Sojourn.",
+            body = "GPX, OwnTracks, Dawarich, Google Timeline and other tracks.",
+            keeps = "Backs up the days it covers",
+            helpLabel = "Where's my Google Timeline?",
+            help = listOf(
+                "On your phone, open Settings › Location › Location services › Timeline.",
+                "Tap “Export Timeline data” and save the file.",
+                "Choose that file here. Older Google Takeout exports (Records.json or the whole zip) work as well, and so do TCX, FIT, KML and GeoJSON tracks.",
+            ),
         ) {
             Button(onClick = onFile, modifier = Modifier.fillMaxWidth()) { Text("Choose files") }
-            TextButton(onClick = { help = !help }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text(if (help) "Hide" else "Where's my Google Timeline?")
-            }
-            AnimatedVisibility(help) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HelpStep(1, "On your phone, open Settings › Location › Location services › Timeline.")
-                    HelpStep(2, "Tap “Export Timeline data” and save the file.")
-                    HelpStep(3, "Choose that file here. Older Google Takeout exports (Records.json or the whole zip) work as well.")
-                }
-            }
         }
     }
 }
@@ -342,10 +346,14 @@ private fun SourceCard(
     shape: Shape,
     title: String,
     body: String,
+    keeps: String,
+    helpLabel: String? = null,
+    help: List<String> = emptyList(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    var open by rememberSaveable(title) { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ShapeIcon(icon, size = 48.dp, shape = shape)
                 Spacer(Modifier.width(16.dp))
@@ -354,8 +362,88 @@ private fun SourceCard(
                     Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Verified, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(keeps, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            }
             content()
+            if (helpLabel != null) {
+                // One child of the card, so the folded steps leave no gap below the button.
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    TextButton(onClick = { open = !open }) { Text(if (open) "Hide" else helpLabel) }
+                    AnimatedVisibility(open) {
+                        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            help.forEachIndexed { index, step -> HelpStep(index + 1, step) }
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+/**
+ * What an import did, in plain lines (added, kept as evidence, already there), and where to go
+ * next: the Calendar at the first day it touched, or Evidence.
+ */
+@Composable
+fun ImportDone(done: ImportPhase.Done, onMore: () -> Unit) {
+    val actions = LocalAppActions.current
+    fun trips(n: Int) = if (n == 1) "1 trip" else "$n trips"
+    fun flights(n: Int) = if (n == 1) "1 flight" else "$n flights"
+    val added = if (done.trips) trips(done.added) else Format.days(done.added)
+    val lines = buildList {
+        if (done.added > 0) add("${if (done.trips) "Trips" else "Days"} are in your Calendar, and every count and rule has been updated.")
+        if (done.backedUp > 0) add("Backed up ${Format.days(done.backedUp)} you already had.")
+        if (done.evidence > 0) {
+            add(
+                if (done.trips) "Kept ${done.evidence} ${if (done.evidence == 1) "document" else "documents"} as evidence, each with its flight."
+                else "Linked ${done.evidence} ${if (done.evidence == 1) "photo" else "photos"} to their days as evidence.",
+            )
+        } else if (done.trips) {
+            add("Their files were already kept as evidence, so nothing was copied twice.")
+        }
+        if (done.skipped > 0) add("${flights(done.skipped).replaceFirstChar(Char::titlecase)} ${if (done.skipped == 1) "was" else "were"} already saved and left as they were.")
+        if (done.duplicatesRemoved > 0) add("Merged ${flights(done.duplicatesRemoved)} an earlier import had saved twice.")
+    }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        ShapeIcon(
+            Icons.Rounded.Done,
+            size = 88.dp,
+            shape = MaterialShapes.SoftBurst.toShape(),
+            container = MaterialTheme.colorScheme.primaryContainer,
+            content = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+        Text(
+            when {
+                done.added > 0 -> "Added $added"
+                done.backedUp > 0 || done.evidence > 0 -> "Evidence kept"
+                else -> "Nothing new"
+            },
+            style = MaterialTheme.typography.headlineSmallEmphasized,
+            textAlign = TextAlign.Center,
+        )
+        Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                lines.ifEmpty { listOf("Everything found was already in Sojourn.") }.forEach { line ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(Icons.Rounded.Done, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text(line, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+        Button(onClick = { actions.calendar(day = done.first) }, modifier = Modifier.fillMaxWidth()) { Text("Open Calendar") }
+        if (done.evidence > 0 || done.backedUp > 0 || done.trips) {
+            OutlinedButton(onClick = { actions.tab(AppTab.EVIDENCE) }, modifier = Modifier.fillMaxWidth()) { Text("Open Evidence") }
+        }
+        TextButton(onClick = onMore) { Text("Import something else") }
     }
 }
 
@@ -460,20 +548,30 @@ private fun Review(review: ImportPhase.Review, vm: ImportViewModel) {
 /** Flight events whose airports couldn't be made out, so none goes missing without a word. */
 @Composable
 private fun UnreadEvents(events: List<UnreadEvent>) {
-    var open by rememberSaveable { mutableStateOf(false) }
+    val actions = LocalAppActions.current
+    var open by rememberSaveable { mutableStateOf(events.size <= 3) }
     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 8.dp, bottom = 8.dp)) {
             Text(
-                "${events.size} flight ${if (events.size == 1) "event" else "events"} couldn't be read: the airports weren't clear. Add ${if (events.size == 1) "it" else "them"} by hand in Plan › Flights.",
+                "${events.size} flight ${if (events.size == 1) "event" else "events"} couldn't be read: the airports weren't clear. Add ${if (events.size == 1) "it" else "each"} as a flight by hand.",
                 style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(end = 8.dp),
             )
-            TextButton(onClick = { open = !open }) { Text(if (open) "Hide" else "Show ${if (events.size == 1) "it" else "them"}") }
             AnimatedVisibility(open) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.padding(top = 4.dp)) {
                     events.sortedBy { it.date }.forEach { event ->
-                        Text("${Format.long(event.date)} · ${event.title}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(event.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(Format.long(event.date), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(onClick = { actions.flight(date = event.date) }) { Text("Add flight") }
+                        }
                     }
                 }
+            }
+            if (events.size > 3) {
+                TextButton(onClick = { open = !open }) { Text(if (open) "Hide them" else "Show them") }
             }
         }
     }
@@ -481,9 +579,9 @@ private fun UnreadEvents(events: List<UnreadEvent>) {
 
 /** The trip review as it looks for [items], for screenshots. */
 @Composable
-fun TripsPreview(items: List<TripItem>) {
+fun TripsPreview(items: List<TripItem>, unread: List<UnreadEvent> = emptyList()) {
     TripsList(
-        ImportPhase.Trips(items, "From 214 calendar events", items.indices.filter { items[it].selectedByDefault }.toSet(), namesUnknown = false),
+        ImportPhase.Trips(items, "From 214 calendar events", items.indices.filter { items[it].selectedByDefault }.toSet(), namesUnknown = false, unread = unread),
         onToggle = {}, onImport = {}, onReset = {}, onAddName = {},
     )
 }
@@ -578,9 +676,9 @@ private fun TripsList(trips: ImportPhase.Trips, onToggle: (Int) -> Unit, onImpor
                                 item.passengerMatch == PassengerMatch.DIFFERENT -> Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Rounded.PersonOff, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text("For ${trip.passenger}, not you")
+                                    Text("For ${app.sojourn.ui.flights.passengerName(trip.passenger.orEmpty())}, not you")
                                 }
-                                trip.passenger != null -> Text("For ${trip.passenger}")
+                                trip.passenger != null -> Text("For ${app.sojourn.ui.flights.passengerName(trip.passenger)}")
                             }
                             if (trip.source.isNotBlank()) Text(trip.source, maxLines = 1, style = MaterialTheme.typography.bodySmall)
                             if (item.othersLeftOut > 0) {
