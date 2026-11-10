@@ -278,7 +278,7 @@ private fun numberColor(day: Day?, colors: Map<String, Color>): Color {
     return if (fill.luminance() > 0.45f) Color.Black else Color.White
 }
 
-/** One month as a card of square day tiles, for the Grid and Compact views. */
+/** One month as a card of square day tiles, for the year view. */
 @Composable
 fun MonthCard(
     month: YearMonth,
@@ -287,37 +287,28 @@ fun MonthCard(
     today: LocalDate,
     colors: Map<String, Color>,
     selection: Selection?,
-    compact: Boolean,
     hits: DayHitTest,
     callbacks: DayGestureCallbacks,
 ) {
     val locale = LocalConfiguration.current.locales[0]
     val offset = (month.atDay(1).dayOfWeek.value - firstDay.value + 7) % 7
-    val gap = if (compact) 2.dp else 3.dp
+    val gap = 3.dp
     val first = book?.firstRecorded
-    Surface(shape = RoundedCornerShape(if (compact) 16.dp else 20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.padding(if (compact) 8.dp else 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = if (compact) 4.dp else 8.dp)) {
-                Text(
-                    month.month.getDisplayName(if (compact) TextStyle.SHORT else TextStyle.FULL, locale),
-                    style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            if (!compact) {
-                Row(Modifier.clearAndSetSemantics { }) {
-                    (0 until 7).forEach { i ->
-                        Text(
-                            firstDay.plus(i.toLong()).getDisplayName(TextStyle.NARROW, locale),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.padding(12.dp)) {
+            Text(month.month.getDisplayName(TextStyle.FULL, locale), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 8.dp))
+            Row(Modifier.clearAndSetSemantics { }) {
+                (0 until 7).forEach { i ->
+                    Text(
+                        firstDay.plus(i.toLong()).getDisplayName(TextStyle.NARROW, locale),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                Spacer(Modifier.height(2.dp))
             }
+            Spacer(Modifier.height(2.dp))
             val weeks = (offset + month.lengthOfMonth() + 6) / 7
             for (week in 0 until weeks) {
                 Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.padding(bottom = gap)) {
@@ -331,7 +322,7 @@ fun MonthCard(
                         val day = book?.get(date)
                         val untracked = day == null && date <= today && first != null && date >= first
                         val selected = selection.has(date)
-                        val shape = RoundedCornerShape(if (compact) 3.dp else 6.dp)
+                        val shape = RoundedCornerShape(6.dp)
                         Box(
                             Modifier
                                 .weight(1f)
@@ -346,8 +337,8 @@ fun MonthCard(
                             Text(
                                 "$n",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = if (compact) 8.sp else 11.sp,
-                                    lineHeight = if (compact) 8.sp else 11.sp,
+                                    fontSize = 11.sp,
+                                    lineHeight = 11.sp,
                                     platformStyle = PlatformTextStyle(includeFontPadding = false),
                                     lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
                                 ),

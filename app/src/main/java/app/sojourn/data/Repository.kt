@@ -296,7 +296,7 @@ class Repository(
      * Puts the countries of a recorded day in [path] order (a country twice when the day left
      * it and came back), by giving the day's rows times spread across it. Flights keep their own.
      */
-    suspend fun reorderDay(date: LocalDate, path: List<String>) {
+    suspend fun reorderDay(date: LocalDate, path: List<String>) = recordChange("Reordered the countries on ${Change.range(date, date)}") {
         val start = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val step = 86_400_000L / (path.size + 1)
         db.withTransaction {

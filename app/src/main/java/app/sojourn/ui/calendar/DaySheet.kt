@@ -18,8 +18,11 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DoNotDisturbOn
+import androidx.compose.material.icons.rounded.FlightTakeoff
+import androidx.compose.material.icons.automirrored.rounded.NoteAdd
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,18 +42,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.sojourn.data.Countries
 import app.sojourn.data.CountrySet
 import app.sojourn.data.RangeEdit
 import app.sojourn.data.db.Document
-import app.sojourn.data.db.Flight
 import app.sojourn.domain.Day
 import app.sojourn.domain.DayBook
 import app.sojourn.domain.DayKind
 import app.sojourn.domain.PlanOrigin
+import app.sojourn.ui.EvidenceDraft
+import app.sojourn.ui.LocalAppActions
 import app.sojourn.ui.components.CountryPickerSheet
 import app.sojourn.ui.components.FlagBadge
 import app.sojourn.ui.components.Format
@@ -60,9 +65,10 @@ import app.sojourn.ui.flights.FlightCard
 import java.time.LocalDate
 
 /**
- * One day: which countries, in what order, and for each whether that country counts the day
- * by its own rules. Every country can be taken off, past or planned, unless a flight put it
- * there, in which case the flight is the thing to change.
+ * One day, the same from every view: which countries, in what order, and for each whether that
+ * country counts the day by its own rules; the day's flights and evidence, and adding either.
+ * Every country can be taken off, past or planned, unless a flight put it there, in which case
+ * the flight is the thing to change. Edits get the app's Undo; clearing the day asks first.
  */
 @Composable
 fun DaySheet(
@@ -70,101 +76,17 @@ fun DaySheet(
     book: DayBook?,
     actions: CalendarActions,
     onDismiss: () -> Unit,
-    onFlight: (Flight) -> Unit = {},
     documents: List<Document> = emptyList(),
 ) {
     val day = book?.get(date)
     val today = book?.today ?: LocalDate.now()
     var picking by remember { mutableStateOf(false) }
     var replacing by remember { mutableStateOf(false) }
+    var clearing by remember { mutableStateOf(false) }
     val future = date > today
-    val flights = book?.flightsOn(date).orEmpty()
-    val flightCountries = flights.flatMap { listOfNotNull(it.originCountry.takeIf { _ -> it.departureDate == date }, it.destinationCountry.takeIf { _ -> it.arrivalDate == date }) }.toSet()
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(Format.long(date), style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f).semantics { heading() })
-                when (day?.kind) {
-                    DayKind.PLANNED -> Tag("Planned")
-                    DayKind.INFERRED -> Tag("Assumed")
-                    DayKind.RECORDED -> Tag("Recorded", container = MaterialTheme.colorScheme.primaryContainer, content = MaterialTheme.colorScheme.onPrimaryContainer)
-                    null -> if (!future) Tag("Untracked", container = MaterialTheme.colorScheme.tertiaryContainer, content = MaterialTheme.colorScheme.onTertiaryContainer)
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-
-            if (day == null) {
-                Text(
-                    if (future) "Nothing planned for this day yet." else "No country recorded for this day.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                if (day.isTravel) {
-                    Route(day, canSwap = day.kind == DayKind.RECORDED && day.countries.size == 2) {
-                        actions.reorder(date, day.path.reversed().fold(mutableListOf<String>()) { acc, c -> if (acc.lastOrNull() != c) acc += c; acc })
-                    }
-                    Spacer(Modifier.height(12.dp))
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
-                    day.countries.forEachIndexed { index, country ->
-                        CountryRow(
-                            day = day,
-                            country = country,
-                            book = book,
-                            index = index,
-                            fromFlight = country in flightCountries,
-                            onRemove = { actions.edit(date, date, RangeEdit.REMOVE, country) },
-                            onConfirm = { actions.edit(date, date, RangeEdit.ADD, country) },
-                        )
-                    }
-                }
-                if (day.kind == DayKind.INFERRED) {
-                    TextButton(onClick = { replacing = true }) { Text("I was somewhere else") }
-                }
-            }
-
-            if (flights.isNotEmpty()) {
-                Spacer(Modifier.height(16.dp))
-                Text("Flights", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(6.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    flights.forEach { flight -> FlightCard(flight, today, container = MaterialTheme.colorScheme.surfaceContainerHigh) { onFlight(flight) } }
-                }
-            }
-
-            DayEvidence(documents.filter { it.day == date }, actions::choosePhoto, actions::deleteDocument)
-
-            val quick = book?.recentCountries(4).orEmpty().filter { it !in day?.countries.orEmpty() }
-            if (quick.isNotEmpty()) {
-                Spacer(Modifier.height(16.dp))
-                Text(if (future) "Also plan" else "Also there", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(4.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    quick.forEach { code ->
-                        SuggestionChip(
-                            onClick = { actions.edit(date, date, RangeEdit.ADD, code) },
-                            label = { Text("${Countries.flag(code)}  ${Countries.name(code)}") },
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = { picking = true }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (future) "Plan a country" else "Add a country")
-                }
-                if (day != null && day.kind != DayKind.INFERRED) {
-                    OutlinedButton(onClick = {
-                        actions.edit(date, date, RangeEdit.CLEAR, null)
-                        onDismiss()
-                    }) { Text("Clear day") }
-                }
-            }
-        }
+        DayDetails(date, book, actions, documents, onDismiss, onAddCountry = { picking = true }, onElsewhere = { replacing = true }, onClear = { clearing = true })
     }
     if (picking || replacing) {
         CountryPickerSheet(
@@ -181,6 +103,154 @@ fun DaySheet(
                 replacing = false
             },
         )
+    }
+    if (clearing && day != null) {
+        val fromFlights = book.flightsOn(date).isNotEmpty()
+        AlertDialog(
+            onDismissRequest = { clearing = false },
+            title = { Text("Clear ${Format.short(date, today)}?") },
+            text = {
+                Text(
+                    "${day.countries.joinToString { "${Countries.flag(it)} ${Countries.name(it)}" }} ${if (day.countries.size == 1) "comes" else "come"} off this day." +
+                        if (fromFlights) " Countries from a flight stay until you change the flight." else "",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    actions.edit(date, date, RangeEdit.CLEAR, null)
+                    clearing = false
+                    onDismiss()
+                }) { Text("Clear", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { clearing = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** What the day sheet shows, without the sheet: kept apart so it can be checked in screenshots. */
+@Composable
+fun DayDetails(
+    date: LocalDate,
+    book: DayBook?,
+    actions: CalendarActions,
+    documents: List<Document>,
+    onDismiss: () -> Unit,
+    onAddCountry: () -> Unit,
+    onElsewhere: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val app = LocalAppActions.current
+    val day = book?.get(date)
+    val today = book?.today ?: LocalDate.now()
+    val future = date > today
+    val flights = book?.flightsOn(date).orEmpty()
+    val flightCountries = flights.flatMap { listOfNotNull(it.originCountry.takeIf { _ -> it.departureDate == date }, it.destinationCountry.takeIf { _ -> it.arrivalDate == date }) }.toSet()
+    Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(Format.long(date), style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f).semantics { heading() })
+            when (day?.kind) {
+                DayKind.PLANNED -> Tag("Planned")
+                DayKind.INFERRED -> Tag("Assumed")
+                DayKind.RECORDED -> Tag("Recorded", container = MaterialTheme.colorScheme.primaryContainer, content = MaterialTheme.colorScheme.onPrimaryContainer)
+                null -> if (!future) Tag("Untracked", container = MaterialTheme.colorScheme.tertiaryContainer, content = MaterialTheme.colorScheme.onTertiaryContainer)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        if (day == null) {
+            Text(
+                if (future) "Nothing planned for this day yet." else "No country recorded for this day.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            if (day.isTravel) {
+                Route(day, canSwap = day.kind == DayKind.RECORDED && day.countries.size == 2) {
+                    actions.reorder(date, day.path.reversed().fold(mutableListOf<String>()) { acc, c -> if (acc.lastOrNull() != c) acc += c; acc })
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+                day.countries.forEachIndexed { index, country ->
+                    CountryRow(
+                        day = day,
+                        country = country,
+                        book = book,
+                        index = index,
+                        fromFlight = country in flightCountries,
+                        onRemove = { actions.edit(date, date, RangeEdit.REMOVE, country) },
+                        onConfirm = { actions.edit(date, date, RangeEdit.ADD, country) },
+                    )
+                }
+            }
+            if (day.kind == DayKind.INFERRED) {
+                TextButton(onClick = onElsewhere) { Text("I was somewhere else") }
+            }
+        }
+
+        val quick = book?.recentCountries(4).orEmpty().filter { it !in day?.countries.orEmpty() }
+        if (quick.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text(if (future) "Also plan" else "Also there", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                quick.forEach { code ->
+                    SuggestionChip(
+                        onClick = { actions.edit(date, date, RangeEdit.ADD, code) },
+                        label = { Text("${Countries.flag(code)}  ${Countries.name(code)}") },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onAddCountry, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (future) "Plan a country" else "Add a country")
+        }
+
+        if (flights.isNotEmpty()) {
+            Spacer(Modifier.height(20.dp))
+            Text("Flights", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                flights.forEach { flight ->
+                    FlightCard(flight, today, container = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        onDismiss()
+                        app.flight(flight)
+                    }
+                }
+            }
+        }
+
+        DayEvidence(documents.filter { it.day == date }, actions::choosePhoto, actions::deleteDocument)
+
+        Spacer(Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            SheetAction(Icons.Rounded.FlightTakeoff, "Add a flight", Modifier.weight(1f)) {
+                onDismiss()
+                app.flight(date = date)
+            }
+            SheetAction(Icons.AutoMirrored.Rounded.NoteAdd, "Add evidence", Modifier.weight(1f)) {
+                onDismiss()
+                app.addEvidence(EvidenceDraft(day = date, country = day?.countries?.singleOrNull()))
+            }
+        }
+        if (day != null && day.kind != DayKind.INFERRED) {
+            TextButton(onClick = onClear, modifier = Modifier.align(Alignment.End).padding(top = 4.dp)) {
+                Text("Clear day", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetAction(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = modifier) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(label, maxLines = 1)
     }
 }
 

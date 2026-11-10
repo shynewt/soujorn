@@ -1,7 +1,6 @@
-package app.sojourn.ui.timeline
+package app.sojourn.ui.calendar
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -12,12 +11,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,21 +24,16 @@ import androidx.compose.material.icons.rounded.Flight
 import androidx.compose.material.icons.rounded.Route
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,143 +43,81 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.sojourn.data.Countries
-import app.sojourn.data.db.Flight
 import app.sojourn.data.flights.Airlines
 import app.sojourn.domain.DateRange
 import app.sojourn.domain.DayCounting
 import app.sojourn.domain.DayKind
 import app.sojourn.domain.Leg
-import app.sojourn.ui.appViewModel
-import app.sojourn.ui.calendar.DaySheet
-import app.sojourn.ui.components.CountryPickerSheet
+import app.sojourn.ui.LocalAppActions
 import app.sojourn.ui.components.EmptyState
 import app.sojourn.ui.components.FlagBadge
 import app.sojourn.ui.components.Format
 import app.sojourn.ui.components.ShapeIcon
 import app.sojourn.ui.components.Tag
-import app.sojourn.ui.flights.FlightEditorSheet
 import app.sojourn.ui.flights.flightTimes
 import java.time.LocalDate
 
-@Composable
-fun TimelineScreen() {
-    val vm = appViewModel { TimelineViewModel(it) }
-    val state by vm.state.collectAsStateWithLifecycle()
-    var filling by remember { mutableStateOf<DateRange?>(null) }
-    var editing by remember { mutableStateOf<StayItem?>(null) }
-    var flight by remember { mutableStateOf<Flight?>(null) }
-    var day by remember { mutableStateOf<LocalDate?>(null) }
-    TimelineContent(
-        state,
-        onFill = { filling = it },
-        onStay = { editing = it },
-        onCrossing = { crossing -> if (crossing.flights.size == 1) flight = crossing.flights.single() else day = crossing.date },
-    )
-    flight?.let { current ->
-        FlightEditorSheet(
-            initial = current,
-            recentAirports = state.recentAirports,
-            preview = vm::previewFlight,
-            onDismiss = { flight = null },
-            onSave = {
-                vm.saveFlight(it)
-                flight = null
-            },
-            onDelete = {
-                vm.deleteFlight(it)
-                flight = null
-            },
-        )
-    }
-    day?.let { date -> DaySheet(date, state.book, vm, onDismiss = { day = null }, onFlight = { flight = it }) }
-    filling?.let { gap ->
-        CountryPickerSheet(
-            title = "Where were you, ${Format.range(gap.start, gap.end, state.today)}?",
-            suggestions = state.recents,
-            onDismiss = { filling = null },
-            onPick = {
-                vm.fill(gap, it)
-                filling = null
-            },
-        )
-    }
-    editing?.let { stay ->
-        StaySheet(
-            stay = stay,
-            recents = state.recents,
-            today = state.today,
-            onDismiss = { editing = null },
-            onChange = {
-                vm.change(stay.leg, it)
-                editing = null
-            },
-            onRemove = {
-                vm.remove(stay.leg)
-                editing = null
-            },
-        )
-    }
-}
+/** Where "Now" sits in the list, for opening there and for "Go to today". */
+internal fun StayListState.nowIndex(): Int = if (ahead.isEmpty()) 0 else 1 + ahead.size
 
+/**
+ * The Calendar's list view (the old Timeline): stays newest first, the crossings between them,
+ * and untracked days with "Fill in", under sticky Ahead / Now / year headers. It opens at "Now",
+ * with the next crossing just above it.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TimelineContent(state: TimelineState, onFill: (DateRange) -> Unit, onStay: (StayItem) -> Unit, onCrossing: (Leg.Crossing) -> Unit = {}) {
-    val scroll = TopAppBarDefaults.pinnedScrollBehavior()
-    Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-        topBar = { TopAppBar(title = { Text("Timeline", style = MaterialTheme.typography.titleLargeEmphasized) }, scrollBehavior = scroll) },
-    ) { padding ->
-        if (state.loaded && state.now == null && state.past.isEmpty() && state.ahead.isEmpty()) {
-            EmptyState(
-                icon = Icons.Rounded.Route,
-                title = "Your journey starts here",
-                body = "Stays show up as days are recorded. Import photos or your calendar to fill in the past.",
-                modifier = Modifier.padding(padding),
-            )
-            return@Scaffold
+fun StayListView(
+    state: StayListState,
+    list: LazyListState,
+    onFill: (DateRange) -> Unit,
+    onStay: (StayItem) -> Unit,
+    onCrossing: (Leg.Crossing) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (state.loaded && state.isEmpty) {
+        val app = LocalAppActions.current
+        EmptyState(
+            icon = Icons.Rounded.Route,
+            title = "Your journey starts here",
+            body = "Stays show up here as days are recorded. Import photos, location history or your calendar to fill in the past.",
+            modifier = modifier,
+            action = { FilledTonalButton(onClick = app::import) { Text("Import") } },
+        )
+        return
+    }
+    var positioned by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.loaded) {
+        if (state.loaded && !positioned) {
+            list.scrollToItem((state.nowIndex() - 2).coerceAtLeast(0))
+            positioned = true
         }
-        // Newest first, from the furthest plan down to the oldest stay; it opens at "Now", with
-        // the next crossing just above it.
-        val nowIndex = if (state.ahead.isEmpty()) 0 else 1 + state.ahead.size
-        val list = rememberLazyListState()
-        var positioned by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(state.loaded) {
-            if (state.loaded && !positioned) {
-                list.scrollToItem((nowIndex - 2).coerceAtLeast(0))
-                positioned = true
-            }
+    }
+    LazyColumn(state = list, modifier = modifier, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+        if (state.ahead.isNotEmpty()) {
+            stickyHeader(key = "h-ahead") { Header("Ahead") }
+            rows(state.ahead, state.today, onFill, onStay, onCrossing)
         }
-        LazyColumn(
-            state = list,
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + 24.dp),
-        ) {
-            if (state.ahead.isNotEmpty()) {
-                stickyHeader(key = "h-ahead") { Header("Ahead") }
-                rows(state.ahead, state.today, onFill, onStay, onCrossing)
-            }
-            state.now?.let { now ->
-                stickyHeader(key = "h-now") { Header("Now") }
-                item(key = "now") { StayRow(now, state.today) { onStay(now) } }
-            }
-            state.past.forEach { (year, items) ->
-                stickyHeader(key = "h-$year") { Header(year.toString()) }
-                rows(items, state.today, onFill, onStay, onCrossing)
-            }
+        state.now?.let { now ->
+            stickyHeader(key = "h-now") { Header("Now") }
+            item(key = "now") { StayRow(now, state.today) { onStay(now) } }
+        }
+        state.past.forEach { (year, items) ->
+            stickyHeader(key = "h-$year") { Header(year.toString()) }
+            rows(items, state.today, onFill, onStay, onCrossing)
         }
     }
 }
 
 private fun LazyListScope.rows(
-    items: List<TimelineItem>,
+    items: List<StayListItem>,
     today: LocalDate,
     onFill: (DateRange) -> Unit,
     onStay: (StayItem) -> Unit,
@@ -194,9 +125,9 @@ private fun LazyListScope.rows(
 ) {
     items(items, key = { it.key }) { item ->
         when (item) {
-            is TimelineItem.StayRow -> StayRow(item.stay, today) { onStay(item.stay) }
-            is TimelineItem.CrossingRow -> CrossingRow(item.crossing, today) { onCrossing(item.crossing) }
-            is TimelineItem.GapRow -> GapRow(item.range, today) { onFill(item.range) }
+            is StayListItem.StayRow -> StayRow(item.stay, today) { onStay(item.stay) }
+            is StayListItem.CrossingRow -> CrossingRow(item.crossing, today) { onCrossing(item.crossing) }
+            is StayListItem.GapRow -> GapRow(item.range, today) { onFill(item.range) }
         }
     }
 }
@@ -273,7 +204,7 @@ private fun StayRow(stay: StayItem, today: LocalDate, onClick: () -> Unit) {
     }
 }
 
-fun DayCounting.short(): String = when (this) {
+private fun DayCounting.short(): String = when (this) {
     DayCounting.ANY_PART -> "any part of a day"
     DayCounting.MIDNIGHT -> "at midnight"
     DayCounting.ARRIVAL_DAY -> "departure day not counted"

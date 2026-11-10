@@ -31,8 +31,11 @@ enum class TrackingMode {
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
-/** How the calendar shows days: a month at a time, or a whole year as month cards or rows. */
-enum class CalendarView(val label: String) { MONTH("Month"), GRID("Grid"), COMPACT("Compact"), ROWS("Rows") }
+/**
+ * How the calendar shows days: a month at a time, a whole year as month cards or rows, or the
+ * list of stays. COMPACT is kept so stored choices still read; the calendar shows it as GRID.
+ */
+enum class CalendarView(val label: String) { MONTH("Month"), GRID("Grid"), COMPACT("Compact"), ROWS("Rows"), LIST("List") }
 
 @Serializable
 data class Settings(
