@@ -35,6 +35,7 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
         places: List<Pair<LocalDate, String>>,
         copies: MutableMap<String, String?> = HashMap(),
         flightId: Long? = null,
+        note: String = "",
     ): Int {
         val kind = when (original.rawKind) {
             RawKind.CALENDAR_EVENT -> DocumentKind.CALENDAR_EVENT
@@ -44,7 +45,7 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
         }
         val title = title(kind, trip)
         if (kind != DocumentKind.BOARDING_PASS) {
-            return places.count { (day, country) -> repository.addDocument(Document(day = day, country = country, kind = kind, title = title, text = original.raw.orEmpty(), flightId = flightId)) }
+            return places.count { (day, country) -> repository.addDocument(Document(day = day, country = country, kind = kind, title = title, text = original.raw.orEmpty(), flightId = flightId, note = note)) }
         }
         val source = original.file ?: return 0
         // A file already kept for these days, from an earlier share or import, isn't kept again.
@@ -55,7 +56,7 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
         if (fresh.isEmpty()) return 0
         val file = copies.getOrPut(source) { store.keep(Uri.parse(source), original.fileName ?: "boarding-pass") } ?: return 0
         return fresh.count { (day, country) ->
-            repository.addDocument(Document(day = day, country = country, kind = kind, title = title, file = file, text = original.raw.orEmpty(), flightId = flightId))
+            repository.addDocument(Document(day = day, country = country, kind = kind, title = title, file = file, text = original.raw.orEmpty(), flightId = flightId, note = note))
         }
     }
 
@@ -71,7 +72,7 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
      * Adds a boarding pass (PDF, picture or Wallet pass) to [flight]. A pass read as another
      * flight isn't added; one with nothing readable is, as the user chose it for this flight.
      */
-    suspend fun attach(flight: Flight, uri: Uri): Attached {
+    suspend fun attach(flight: Flight, uri: Uri, note: String = ""): Attached {
         val found = travel.files(listOf(uri)).trips
         val own = found.firstOrNull { it.kind == TripKind.FLIGHT && it.isDuplicateOf(flight) }
         if (own == null && found.any { it.kind == TripKind.FLIGHT }) {
@@ -82,7 +83,7 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
         val trip = FoundTrip(TripKind.FLIGHT, flight.departureDate, flight.arrivalDate, number = number, from = flight.origin, to = flight.destination)
         val original = own ?: trip.copy(file = uri.toString(), fileName = travel.displayName(uri), rawKind = RawKind.BOARDING_PASS)
         val places = listOf(flight.departureDate to flight.originCountry, flight.arrivalDate to flight.destinationCountry).distinct()
-        val kept = keep(trip, original, places, flightId = flight.id)
+        val kept = keep(trip, original, places, flightId = flight.id, note = note)
         // The pass fills in what the flight didn't know: its booking reference, passenger, seat.
         if (own != null) repository.enrichFlight(flight, own)
         return if (kept > 0) Attached.Kept(kept) else Attached.AlreadyKept

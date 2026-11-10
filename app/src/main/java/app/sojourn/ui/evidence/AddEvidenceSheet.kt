@@ -26,6 +26,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItemDefaults
@@ -34,9 +35,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedListItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -53,18 +56,29 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.sojourn.AppContainer
 import app.sojourn.container
+import app.sojourn.data.Countries
 import app.sojourn.data.EvidenceKeeper
 import app.sojourn.data.db.Document
 import app.sojourn.data.db.DocumentKind
+import app.sojourn.data.db.Flight
+import app.sojourn.data.flights.Airlines
+import app.sojourn.data.travel.FoundTrip
+import app.sojourn.data.travel.Names
+import app.sojourn.data.travel.PassengerMatch
+import app.sojourn.data.travel.TripKind
 import app.sojourn.domain.DayBook
 import app.sojourn.ui.EvidenceDraft
 import app.sojourn.ui.appViewModel
 import app.sojourn.ui.components.Format
 import app.sojourn.ui.components.ShapeIcon
 import app.sojourn.ui.components.segmentedColors
+import app.sojourn.ui.imports.asFlight
 import java.io.Serializable
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -91,7 +105,36 @@ data class EvidenceForm(
     val title: String,
     val note: String,
     val flightId: Long?,
+    val pass: PassRead? = null,
 )
+
+/** A boarding pass as read from its file. */
+data class PassRead(
+    val trip: FoundTrip,
+    /** The flight it would be saved as; null when an airport isn't known. */
+    val flight: Flight?,
+    val saved: Flight?,
+    val passenger: PassengerMatch,
+) {
+    val departureCountry: String? get() = flight?.originCountry
+    val arrivalCountry: String? get() = flight?.destinationCountry
+
+    /** Kept with its flight on both its days; another traveller's pass stays a plain document. */
+    val goesWithFlight: Boolean get() = flight != null && passenger != PassengerMatch.DIFFERENT
+}
+
+sealed interface PassReading {
+    data object Idle : PassReading
+    data object Reading : PassReading
+    data class Read(val pass: PassRead) : PassReading
+    data object Unreadable : PassReading
+}
+
+private fun EvidenceKeeper.Attached.outcome(): AddOutcome = when (this) {
+    is EvidenceKeeper.Attached.Kept -> AddOutcome.Saved
+    EvidenceKeeper.Attached.AlreadyKept -> AddOutcome.Duplicate
+    is EvidenceKeeper.Attached.OtherFlight -> AddOutcome.OtherFlight(found)
+}
 
 /** Keeps new evidence: copies its file into the app once, and never the same file twice for a day. */
 class AddEvidenceViewModel(private val container: AppContainer) : ViewModel() {
@@ -102,6 +145,34 @@ class AddEvidenceViewModel(private val container: AppContainer) : ViewModel() {
     val context = combine(repository.book, repository.settings) { book, settings -> Context(book, settings.taxResidence) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Context())
 
+    private val _pass = MutableStateFlow<PassReading>(PassReading.Idle)
+    val pass: StateFlow<PassReading> = _pass
+    private var reading: Job? = null
+
+    /** Reads [file] as a boarding pass, so the form can fill itself in from it. */
+    fun read(file: String?) {
+        reading?.cancel()
+        if (file == null) {
+            _pass.value = PassReading.Idle
+            return
+        }
+        _pass.value = PassReading.Reading
+        reading = viewModelScope.launch {
+            val read = runCatching { withContext(Dispatchers.IO) { readPass(Uri.parse(file)) } }.getOrNull()
+            _pass.value = read?.let(PassReading::Read) ?: PassReading.Unreadable
+        }
+    }
+
+    private suspend fun readPass(uri: Uri): PassRead? {
+        val names = repository.settingsStore.current().travellerNames
+        val flights = container.travel.files(listOf(uri)).trips.filter { it.kind == TripKind.FLIGHT }
+        // A family's PDF holds a pass each: the user's own is the one that counts.
+        val trip = flights.firstOrNull { Names.match(it.passenger, names) == PassengerMatch.MATCH } ?: flights.firstOrNull() ?: return null
+        val airports = container.airports
+        val flight = trip.asFlight(airports[trip.from]?.country, airports[trip.to]?.country)
+        return PassRead(trip, flight, flight?.let { repository.savedFlight(it) }, Names.match(trip.passenger, names))
+    }
+
     /** Saves [form] where the app outlives the form, then reports back through [done]. */
     fun save(form: EvidenceForm, done: (AddOutcome) -> Unit) {
         viewModelScope.launch { done(runCatching { keep(form) }.getOrDefault(AddOutcome.Failed)) }
@@ -109,16 +180,22 @@ class AddEvidenceViewModel(private val container: AppContainer) : ViewModel() {
 
     private suspend fun keep(form: EvidenceForm): AddOutcome {
         val store = container.evidence
+        val pass = form.pass
+        // A pass read as the user's flight goes with that flight, saving it first if it's new,
+        // as Import would: one change, undone together.
+        if (form.kind == DocumentKind.BOARDING_PASS && form.flightId == null && form.file != null && pass != null && pass.goesWithFlight) {
+            val read = pass.flight!!
+            val label = listOf("Added boarding pass", Airlines.format(read.number), "${read.origin}→${read.destination}").filter { it.isNotBlank() }.joinToString(" ")
+            return repository.recordChange(label) {
+                val flight = repository.savedFlight(read) ?: repository.importFlights(listOf(read)).let { repository.savedFlight(read) }
+                    ?: return@recordChange AddOutcome.Failed
+                container.keeper.attach(flight, form.file, form.note).outcome()
+            }
+        }
         // A flight's boarding pass is read and matched like one added from the flight itself.
         if (form.kind == DocumentKind.BOARDING_PASS && form.flightId != null && form.file != null) {
             val flight = repository.flights.first().firstOrNull { it.id == form.flightId }
-            if (flight != null) {
-                return when (val result = container.keeper.attach(flight, form.file)) {
-                    is EvidenceKeeper.Attached.Kept -> AddOutcome.Saved
-                    EvidenceKeeper.Attached.AlreadyKept -> AddOutcome.Duplicate
-                    is EvidenceKeeper.Attached.OtherFlight -> AddOutcome.OtherFlight(result.found)
-                }
-            }
+            if (flight != null) return container.keeper.attach(flight, form.file, form.note).outcome()
         }
         // A boarding pass for a flight already saved goes with that flight, on both its days.
         if (form.kind == DocumentKind.BOARDING_PASS && form.flightId == null && form.file != null) {
@@ -173,6 +250,21 @@ fun AddEvidenceSheet(draft: EvidenceDraft, onDismiss: () -> Unit) {
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) values = values.copy(file = uri.toString()) }
     val pickPicture = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) values = values.copy(file = uri.toString()) }
     val country = values.country ?: known.book?.get(values.day)?.last ?: known.taxResidence
+    val pass by vm.pass.collectAsStateWithLifecycle()
+    LaunchedEffect(values.file, values.kind) { vm.read(values.file.takeIf { values.kind == DocumentKind.BOARDING_PASS }) }
+    // Filled in once per file, so what the user changes afterwards stays, rotation included.
+    var filledFrom by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(pass) {
+        val read = (pass as? PassReading.Read)?.pass ?: return@LaunchedEffect
+        if (filledFrom == values.file) return@LaunchedEffect
+        filledFrom = values.file
+        values = values.copy(
+            day = read.trip.departure,
+            country = read.departureCountry ?: values.country,
+            title = values.title.ifBlank { app.keeper.title(DocumentKind.BOARDING_PASS, read.trip) },
+            note = if (read.goesWithFlight) values.note else values.note.ifBlank { passDetails(read.trip) },
+        )
+    }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         AddEvidenceLayout(
@@ -186,10 +278,12 @@ fun AddEvidenceSheet(draft: EvidenceDraft, onDismiss: () -> Unit) {
             onClose = onDismiss,
             onPickFile = { pickFile.launch(arrayOf("application/pdf", "image/*", "application/vnd.apple.pkpass", "*/*")) },
             onPickPicture = { pickPicture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            pass = pass,
             onSave = { kind, title ->
                 saving = true
                 problem = null
-                val form = EvidenceForm(kind, values.file?.let(Uri::parse), fileName, country!!, values.day, values.end, title, values.note.trim(), draft.flightId)
+                val read = (pass as? PassReading.Read)?.pass
+                val form = EvidenceForm(kind, values.file?.let(Uri::parse), fileName, country!!, values.day, values.end, title, values.note.trim(), draft.flightId, read)
                 vm.save(form) { outcome ->
                     saving = false
                     when (outcome) {
@@ -234,11 +328,13 @@ fun AddEvidenceLayout(
     onClose: () -> Unit,
     onPickFile: () -> Unit,
     onPickPicture: () -> Unit,
+    pass: PassReading = PassReading.Idle,
     onSave: (DocumentKind, String) -> Unit,
 ) {
     val current = values.kind
-    val canSave = current != null && country != null && !saving &&
+    val canSave = current != null && country != null && !saving && pass != PassReading.Reading &&
         (values.file != null || current.fileOptional && (values.note.isNotBlank() || values.title.isNotBlank()))
+    val withFlight = (pass as? PassReading.Read)?.pass?.takeIf { it.goesWithFlight && current == DocumentKind.BOARDING_PASS }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -278,25 +374,30 @@ fun AddEvidenceLayout(
 
             FilePart(values.file, fileName, current.fileOptional, onClear = { onChange(values.copy(file = null)) }, onFile = onPickFile, onPicture = onPickPicture)
 
-            WhereAndWhen(
-                country = country,
-                day = values.day,
-                until = values.end,
-                period = current.period,
-                recents = recents,
-                onCountry = { onChange(values.copy(country = it)) },
-                onDates = { from, to -> onChange(values.copy(day = from, until = to)) },
-            )
-            OutlinedTextField(
-                value = values.title,
-                onValueChange = { onChange(values.copy(title = it)) },
-                label = { Text("Title") },
-                placeholder = { Text(values.defaultTitle) },
-                supportingText = if (values.title.isBlank()) ({ Text("Left empty: “${values.defaultTitle}”") }) else null,
-                singleLine = true,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (current == DocumentKind.BOARDING_PASS) PassPart(pass)
+
+            // A pass read as the user's flight says where and when itself, on both its days.
+            if (withFlight == null) {
+                WhereAndWhen(
+                    country = country,
+                    day = values.day,
+                    until = values.end,
+                    period = current.period,
+                    recents = recents,
+                    onCountry = { onChange(values.copy(country = it)) },
+                    onDates = { from, to -> onChange(values.copy(day = from, until = to)) },
+                )
+                OutlinedTextField(
+                    value = values.title,
+                    onValueChange = { onChange(values.copy(title = it)) },
+                    label = { Text("Title") },
+                    placeholder = { Text(values.defaultTitle) },
+                    supportingText = if (values.title.isBlank()) ({ Text("Left empty: “${values.defaultTitle}”") }) else null,
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             OutlinedTextField(
                 value = values.note,
                 onValueChange = { onChange(values.copy(note = it)) },
@@ -312,6 +413,63 @@ fun AddEvidenceLayout(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+private fun clock(minute: Int?): String? = minute?.let { "%02d:%02d".format(it / 60, it % 60) }
+
+/** What a pass says beyond its flight: passenger, seat and booking. */
+internal fun passDetails(trip: FoundTrip): String = listOfNotNull(
+    trip.passenger?.takeIf { it.isNotBlank() },
+    trip.seat?.takeIf { it.isNotBlank() }?.let { "Seat $it" },
+    trip.reference?.takeIf { it.isNotBlank() }?.let { "Booking $it" },
+).joinToString(" · ")
+
+/** What was read from a boarding pass, and where saving it will keep it. */
+@Composable
+private fun PassPart(pass: PassReading) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    when (pass) {
+        PassReading.Idle -> Unit
+        PassReading.Reading -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp)) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(10.dp))
+            Text("Reading the pass…", style = MaterialTheme.typography.bodyMedium, color = muted)
+        }
+        PassReading.Unreadable -> Text(
+            "No flight could be read from this file. Say its day and country below.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = muted,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+        is PassReading.Read -> {
+            val read = pass.pass
+            val trip = read.trip
+            val route = listOf(Airlines.format(trip.number), "${trip.from} → ${trip.to}").filter { it.isNotBlank() }.joinToString(" · ")
+            val times = listOfNotNull(clock(trip.departureMinute), clock(trip.arrivalMinute)).joinToString(" → ")
+            val dates = if (trip.arrival == trip.departure) Format.long(trip.departure) else "${Format.long(trip.departure)} → ${Format.long(trip.arrival)}"
+            val ends = listOfNotNull(read.departureCountry, read.arrivalCountry).distinct()
+                .joinToString(" and ") { "${Countries.flag(it)} ${Countries.name(it)}" }
+            val outcome = when {
+                read.passenger == PassengerMatch.DIFFERENT ->
+                    "It's in ${trip.passenger}'s name, not yours, so it's kept as a document without adding the flight."
+                read.flight == null -> "One of its airports isn't known, so it's kept as a document. Check its day and country below."
+                read.saved != null -> "Goes with your saved flight, as evidence for both ends: $ends."
+                else -> "Saving adds this flight too, and keeps the pass as evidence for both ends: $ends."
+            }
+            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Read from the pass", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text(route, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text(listOf(dates, times).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    passDetails(trip).takeIf { it.isNotBlank() }?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                    Spacer(Modifier.size(4.dp))
+                    Text(outcome, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+            }
         }
     }
 }

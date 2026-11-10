@@ -8,6 +8,9 @@ import app.sojourn.data.EvidenceStore
 import app.sojourn.data.Settings
 import app.sojourn.data.db.Document
 import app.sojourn.data.db.DocumentKind
+import app.sojourn.data.travel.FoundTrip
+import app.sojourn.data.travel.PassengerMatch
+import app.sojourn.data.travel.TripKind
 import app.sojourn.domain.CountingOptions
 import app.sojourn.domain.DayBook
 import app.sojourn.ui.evidence.AddEvidenceLayout
@@ -15,6 +18,8 @@ import app.sojourn.ui.evidence.EvidenceContent
 import app.sojourn.ui.evidence.EvidencePackContent
 import app.sojourn.ui.evidence.FormValues
 import app.sojourn.ui.evidence.PackExport
+import app.sojourn.ui.evidence.PassRead
+import app.sojourn.ui.evidence.PassReading
 import app.sojourn.ui.evidence.evidenceState
 import app.sojourn.ui.evidence.packPreview
 import java.time.LocalDate
@@ -79,5 +84,17 @@ class EvidenceScreenshotTest {
     fun addForm() = compose.screenshot("evidence_add_form", dark = true) {
         val values = FormValues(DocumentKind.UTILITY_BILL, null, null, LocalDate.of(year, 1, 1), LocalDate.of(year, 3, 31))
         AddEvidenceLayout(values, {}, null, "PT", emptyList(), false, null, {}, {}, {}) { _, _ -> }
+    }
+
+    @Test
+    fun addPass() = compose.screenshot("evidence_add_pass") {
+        val trip = FoundTrip(
+            TripKind.FLIGHT, LocalDate.of(year, 11, 24), number = "W64666", from = "BCN", to = "LCA",
+            departureMinute = 6 * 60 + 10, arrivalMinute = 10 * 60 + 45, passenger = "Ana Ruiz", seat = "12A", reference = "K7QX2P",
+        )
+        val flight = flight.copy(id = 0, number = "W64666", origin = "BCN", destination = "LCA", originCountry = "ES", destinationCountry = "CY", departureDate = trip.departure, arrivalDate = trip.arrival)
+        val values = FormValues(DocumentKind.BOARDING_PASS, "content://pass.pdf", "ES", trip.departure, null, title = "Boarding pass: W6 4666 BCN→LCA")
+        val pass = PassReading.Read(PassRead(trip, flight, saved = null, passenger = PassengerMatch.MATCH))
+        AddEvidenceLayout(values, {}, "pass.pdf", "ES", emptyList(), false, null, {}, {}, {}, pass) { _, _ -> }
     }
 }
