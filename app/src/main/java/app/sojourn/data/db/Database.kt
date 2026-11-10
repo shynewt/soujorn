@@ -471,6 +471,13 @@ interface DocumentDao {
     @Query("SELECT COUNT(*) FROM documents WHERE file = :file")
     suspend fun usingFile(file: String): Int
 
+    @Query("SELECT * FROM documents WHERE file = :file")
+    suspend fun withFile(file: String): List<Document>
+
+    /** Documents that name a flight, or could: what a flight's ids changing may leave behind. */
+    @Query("SELECT * FROM documents WHERE flightId IS NOT NULL OR kind IN ('BOARDING_PASS', 'CALENDAR_EVENT', 'BOOKING')")
+    suspend fun flightDocuments(): List<Document>
+
     @Query("DELETE FROM documents")
     suspend fun clearAll()
 }

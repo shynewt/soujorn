@@ -160,8 +160,13 @@ data class Kept(val documents: List<Document>) {
 /** [documents] as pieces of evidence: the same file or text for the same flight or title goes together. */
 fun bundle(documents: List<Document>): List<Kept> = documents
     .groupBy { doc ->
-        if (doc.kind == DocumentKind.PHOTO) "photo:${doc.id}"
-        else listOf(doc.kind, doc.file ?: doc.text.hashCode(), doc.flightId ?: doc.title, doc.until).joinToString("|")
+        when {
+            doc.kind == DocumentKind.PHOTO -> "photo:${doc.id}"
+            // One file or one flight's text goes together; anything else is its own piece.
+            doc.file != null -> "file:${doc.kind}|${doc.file}"
+            doc.flightId != null && doc.text.isNotBlank() -> "flight:${doc.kind}|${doc.flightId}|${doc.text.hashCode()}"
+            else -> "doc:${doc.id}"
+        }
     }
     .values.map { Kept(it.sortedBy(Document::day)) }
 

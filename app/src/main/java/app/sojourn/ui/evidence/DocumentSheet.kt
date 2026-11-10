@@ -71,15 +71,17 @@ class DocumentEdits(container: AppContainer) : ViewModel() {
     /** Saves [kept]'s new title and note on every copy, and its dates and country when it's on one day. */
     fun update(kept: Kept, title: String, note: String, day: LocalDate, until: LocalDate?, country: String) {
         viewModelScope.launch {
-            kept.documents.forEach { doc ->
-                val moved = if (kept.documents.size == 1) doc.copy(day = day, until = until?.takeIf { it != day }, country = country) else doc
+            // A file kept for two days (a pass) changes on both, even when opened from one day.
+            val all = kept.documents.flatMap { repository.copiesOf(it) }.distinctBy { it.id }
+            all.forEach { doc ->
+                val moved = if (all.size == 1) doc.copy(day = day, until = until?.takeIf { it != day }, country = country) else doc
                 repository.updateDocument(moved.copy(title = title, note = note))
             }
         }
     }
 
     fun remove(kept: Kept) {
-        viewModelScope.launch { kept.documents.forEach { repository.deleteDocument(it) } }
+        viewModelScope.launch { kept.documents.flatMap { repository.copiesOf(it) }.distinctBy { it.id }.forEach { repository.deleteDocument(it) } }
     }
 
     fun choosePhoto(document: Document, uri: String) {

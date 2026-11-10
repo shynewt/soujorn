@@ -120,6 +120,14 @@ class AddEvidenceViewModel(private val container: AppContainer) : ViewModel() {
                 }
             }
         }
+        // A boarding pass for a flight already saved goes with that flight, on both its days.
+        if (form.kind == DocumentKind.BOARDING_PASS && form.flightId == null && form.file != null) {
+            when (val result = container.keeper.attachToSaved(form.file)) {
+                is EvidenceKeeper.Attached.Kept -> return AddOutcome.Saved
+                EvidenceKeeper.Attached.AlreadyKept -> return AddOutcome.Duplicate
+                else -> Unit
+            }
+        }
         val stored = form.file?.let { uri ->
             val hash = store.hash(uri) ?: return AddOutcome.Failed
             val same = repository.documents(form.day, form.country, form.kind).any { existing -> existing.file?.let { store.hashOf(it) } == hash }

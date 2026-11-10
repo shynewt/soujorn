@@ -10,6 +10,7 @@ import app.sojourn.data.travel.RawKind
 import app.sojourn.data.travel.TravelImporter
 import app.sojourn.data.travel.TripKind
 import java.time.LocalDate
+import kotlinx.coroutines.flow.first
 
 /**
  * Keeps what a trip was found in as evidence for its days: a boarding pass file, a calendar
@@ -85,6 +86,17 @@ class EvidenceKeeper(private val repository: Repository, private val store: Evid
         // The pass fills in what the flight didn't know: its booking reference, passenger, seat.
         if (own != null) repository.enrichFlight(flight, own)
         return if (kept > 0) Attached.Kept(kept) else Attached.AlreadyKept
+    }
+
+    /**
+     * Adds a boarding pass to the saved flight it reads as, if there is one; null when it reads
+     * as no saved flight (or not at all), to be kept as a plain document instead.
+     */
+    suspend fun attachToSaved(uri: Uri): Attached? {
+        val flights = repository.flights.first()
+        val trip = travel.files(listOf(uri)).trips.firstOrNull { it.kind == TripKind.FLIGHT } ?: return null
+        val flight = flights.firstOrNull { trip.isDuplicateOf(it) } ?: return null
+        return attach(flight, uri)
     }
 
     /** The evidence kept for [flight]: what's titled with its route on its two days, both days' copies. */

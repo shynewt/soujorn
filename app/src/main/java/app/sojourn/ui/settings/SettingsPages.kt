@@ -358,7 +358,7 @@ private fun DataPage(settings: Settings, extras: SettingsExtras, vm: SettingsCom
                 }
             },
         ) { chooseFolder.launch(null) }
-        ActionRow(1, 4, Icons.Rounded.Download, "Export backup", "Everything in one file, to keep or move to another phone") { exportJson.launch("sojourn-${LocalDate.now()}.json") }
+        ActionRow(1, 4, Icons.Rounded.Download, "Export backup", "Days, plans, flights, rules and settings in one file. Evidence files go in the evidence pack") { exportJson.launch("sojourn-${LocalDate.now()}.json") }
         ActionRow(2, 4, Icons.Rounded.Upload, "Restore backup", "Merge a backup in, or replace everything") { restore.launch(arrayOf("application/json", "text/plain", "*/*")) }
         ActionRow(3, 4, Icons.Rounded.TableChart, "Export spreadsheet", "Every day and country as CSV") { exportCsv.launch("sojourn-days-${LocalDate.now()}.csv") }
     }

@@ -112,9 +112,26 @@ class Repository(
         if (currentCoroutineContext()[RecordingKey] != null) return block()
         val before = tables()
         val result = withContext(Recording()) { block() }
+        relinkEvidence()
         val change = Change.between(changeLog.nextId(), System.currentTimeMillis(), label, before, tables())
         if (!change.isEmpty) changeLog.add(change)
         return result
+    }
+
+    /**
+     * Points evidence at the flight it backs up again after flights got new ids (a restore, an
+     * undo, duplicates merged), by its route and day; evidence whose flight is gone names none.
+     */
+    private suspend fun relinkEvidence() {
+        val flights = db.flights().all()
+        val ids = flights.mapTo(HashSet()) { it.id }
+        for (doc in db.documents().flightDocuments()) {
+            if (doc.flightId != null && doc.flightId in ids) continue
+            val match = flights.firstOrNull { f ->
+                "${f.origin}→${f.destination}" in doc.title && (doc.day == f.departureDate || doc.day == f.arrivalDate)
+            }?.id
+            if (match != doc.flightId) db.documents().upsert(doc.copy(flightId = match))
+        }
     }
 
     /**
@@ -157,7 +174,7 @@ class Repository(
         onDaysChanged()
     }
 
-    suspend fun addToDay(day: LocalDate, country: String) {
+    suspend fun addToDay(day: LocalDate, country: String) = recordChange("Added ${Countries.name(country)} to ${Change.range(day, day)}") {
         db.presence().insertMissing(listOf(Presence(day, country, Source.MANUAL)))
         onDaysChanged()
     }
@@ -341,7 +358,7 @@ class Repository(
                 db.documents().upsert(existing.copy(candidates = choices.joinToString("\n")))
                 return false
             }
-        } else if (document.file == null && db.documents().find(document.day, document.country, document.kind).any { it.title == document.title && it.text == document.text }) {
+        } else if (document.file == null && db.documents().find(document.day, document.country, document.kind).any { it.title == document.title && it.text == document.text && it.note == document.note }) {
             return false
         }
         db.documents().upsert(document)
@@ -363,6 +380,12 @@ class Repository(
     }
 
     /** Saves changes to a kept document: its title, note, dates or country. Its file stays as it is. */
+    /** [document] and its copies on other days: one file kept for a flight's two days, say. */
+    suspend fun copiesOf(document: Document): List<Document> {
+        val file = document.file ?: return listOf(document)
+        return db.documents().withFile(file).filter { it.kind == document.kind }.ifEmpty { listOf(document) }
+    }
+
     suspend fun updateDocument(document: Document) {
         db.documents().upsert(document)
     }
@@ -408,7 +431,13 @@ class Repository(
     }
 
     suspend fun saveFlight(flight: Flight) = recordChange("Saved flight ${flight.number.ifBlank { "" }} ${flight.origin}→${flight.destination}".replace("  ", " ")) {
-        db.flights().upsert(flight)
+        // A boarding pass attached while the editor was open filled these in; a form opened
+        // before that has them blank and mustn't wipe them.
+        val saved = if (flight.id != 0L) db.flights().all().firstOrNull { it.id == flight.id } else null
+        db.flights().upsert(
+            if (saved == null) flight
+            else flight.copy(reference = flight.reference.ifBlank { saved.reference }, passenger = flight.passenger.ifBlank { saved.passenger }, seat = flight.seat.ifBlank { saved.seat }),
+        )
         onDaysChanged()
     }
 
@@ -426,19 +455,27 @@ class Repository(
         db.withTransaction {
             val known = db.flights().all().toMutableList()
             for (flight in flights) {
-                // A flight already saved keeps what this copy adds: its booking reference,
-                // passenger, seat, number or times.
+                // A flight already saved only gains what it didn't know (booking reference,
+                // passenger, seat, number, times); its airports and note stay as they are.
                 val existing = known.indexOfFirst { FlightMatch.same(it, flight) }
                 if (existing >= 0) {
-                    val merged = FlightMatch.merge(known[existing], flight).copy(id = known[existing].id)
-                    if (merged != known[existing]) {
-                        db.flights().upsert(merged)
-                        known[existing] = merged
+                    val old = known[existing]
+                    val filled = old.copy(
+                        number = old.number.ifBlank { flight.number },
+                        departureMinute = old.departureMinute ?: flight.departureMinute,
+                        arrivalMinute = old.arrivalMinute ?: flight.arrivalMinute,
+                        reference = old.reference.ifBlank { flight.reference },
+                        passenger = old.passenger.ifBlank { flight.passenger },
+                        seat = old.seat.ifBlank { flight.seat },
+                    )
+                    if (filled != old) {
+                        db.flights().upsert(filled)
+                        known[existing] = filled
                     }
                     continue
                 }
-                db.flights().upsert(flight)
-                known += flight
+                val id = db.flights().upsert(flight.copy(id = 0))
+                known += flight.copy(id = id)
                 added++
             }
             removed = mergeDuplicateFlights()

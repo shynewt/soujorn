@@ -192,7 +192,7 @@ fun UndoChanges(shell: ShellViewModel, snackbar: SnackbarHostState) {
         shell.newChanges.collect { change ->
             if (change == null || change.id == seen) return@collect
             seen = change.id
-            if (change.label.startsWith("Reverted") || change.isEmpty) return@collect
+            if (change.label.startsWith("Reverted") || change.isEmpty || change.label in NO_UNDO || change.label.startsWith("Restored")) return@collect
             launch {
                 val result = snackbar.showSnackbar(change.label, actionLabel = "Undo", withDismissAction = true, duration = SnackbarDuration.Long)
                 if (result == SnackbarResult.ActionPerformed) shell.undo(change)
@@ -200,6 +200,12 @@ fun UndoChanges(shell: ShellViewModel, snackbar: SnackbarHostState) {
         }
     }
 }
+
+/**
+ * Changes whose Undo couldn't put everything back: erasing deletes evidence files, and a
+ * restore also replaces rules and settings, which the change log doesn't keep.
+ */
+private val NO_UNDO = setOf("Erased all data", "Merged a backup in")
 
 /** The flight and stay editors and the evidence form, open over whichever screen asked. */
 @Composable

@@ -9,6 +9,7 @@ import app.sojourn.data.db.DocumentKind
 import app.sojourn.data.db.Presence
 import app.sojourn.data.db.Source
 import app.sojourn.data.RangeEdit
+import app.sojourn.data.travel.PassengerMatch
 import app.sojourn.data.travel.RawKind
 import app.sojourn.data.travel.TripKind
 import app.sojourn.data.travel.TripScan
@@ -258,7 +259,8 @@ class ImportViewModel(private val container: AppContainer) : ViewModel() {
         // import run twice, or a flight already entered by hand, never ends up there twice.
         // Flights already saved are passed too: they only gain what these copies add (booking
         // reference, passenger, seat), never a second copy.
-        val known = trips.items.filter { it.duplicate && it.usable }.mapNotNull { it.trip.asFlight(it.fromCountry, it.toCountry) }
+        // Not other passengers' passes: their name and seat aren't the user's.
+        val known = trips.items.filter { it.duplicate && it.usable && it.passengerMatch != PassengerMatch.DIFFERENT }.mapNotNull { it.trip.asFlight(it.fromCountry, it.toCountry) }
         val result = repository.importFlights(flights + known).let { it.copy(skipped = it.skipped - known.size) }
         // Keep what each trip was found in as evidence, for the trips added and for those
         // already there: a calendar event, a booking's text, a boarding pass file.

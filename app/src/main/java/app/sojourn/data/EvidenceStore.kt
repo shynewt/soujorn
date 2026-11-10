@@ -37,7 +37,11 @@ class EvidenceStore(private val context: Context, private val dir: File) {
     /** Copies a file the user imported into the app's evidence folder; returns its name there. */
     suspend fun keep(uri: Uri, name: String): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val clean = name.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._-]"), "_").takeLast(60).ifBlank { "file" }
+            var clean = name.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._-]"), "_").takeLast(60).ifBlank { "file" }
+            // Without an extension the file wouldn't open, show or export as what it is.
+            if ('.' !in clean) {
+                context.contentResolver.getType(uri)?.let { android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }?.let { clean += ".$it" }
+            }
             val stored = "${UUID.randomUUID().toString().take(8)}-$clean"
             context.contentResolver.openInputStream(uri)!!.use { input -> File(dir, stored).outputStream().use { input.copyTo(it) } }
             stored
@@ -102,8 +106,10 @@ class EvidenceStore(private val context: Context, private val dir: File) {
     suspend fun writePack(out: OutputStream, year: Int, book: DayBook, documents: List<Document>): PackResult = withContext(Dispatchers.IO) {
         val from = LocalDate.of(year, 1, 1)
         val to = minOf(LocalDate.of(year, 12, 31), book.today)
-        // Period documents (a lease, a year's bills) count for every year they overlap.
-        val inYear = documents.filter { it.day <= to && (it.until ?: it.day) >= from }
+        // Period documents (a lease, a year's bills) count for every year they overlap. Documents
+        // go in to the year's end, as the pack screen lists them (a flight booked for December);
+        // the days stop at today.
+        val inYear = documents.filter { it.day <= LocalDate.of(year, 12, 31) && (it.until ?: it.day) >= from }
         // One file backing two days (a pass's departure and arrival) goes in once.
         val copiedFiles = HashMap<String, String>()
         val missing = mutableListOf<String>()
