@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Flight
@@ -32,6 +34,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -49,6 +52,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.sojourn.data.Countries
@@ -323,30 +327,34 @@ fun MonthCard(
                         val untracked = day == null && date <= today && first != null && date >= first
                         val selected = selection.has(date)
                         val shape = RoundedCornerShape(6.dp)
-                        Box(
-                            Modifier
-                                .weight(1f)
-                                .aspectRatio(1f)
-                                .clip(shape)
-                                .dayTile(day, colors, untracked, rows = false)
-                                .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
-                                .then(if (date == today) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, shape) else Modifier)
-                                .dayCell(date, hits, callbacks, describeDay(date, day, book, today)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "$n",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 11.sp,
-                                    lineHeight = 11.sp,
-                                    platformStyle = PlatformTextStyle(includeFontPadding = false),
-                                    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
-                                ),
-                                maxLines = 1,
-                                softWrap = false,
-                                fontWeight = if (date == today) FontWeight.Bold else FontWeight.Normal,
-                                color = numberColor(day, colors),
-                            )
+                        val flight = book?.flightsOn(date)?.isNotEmpty() == true
+                        // The plane sits on the tile's corner, over the gap, so it never covers the number.
+                        Box(Modifier.weight(1f).aspectRatio(1f).then(if (flight) Modifier.zIndex(1f) else Modifier)) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .clip(shape)
+                                    .dayTile(day, colors, untracked, rows = false)
+                                    .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
+                                    .then(if (date == today) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, shape) else Modifier)
+                                    .dayCell(date, hits, callbacks, describeDay(date, day, book, today)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "$n",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 11.sp,
+                                        lineHeight = 11.sp,
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                        lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    fontWeight = if (date == today) FontWeight.Bold else FontWeight.Normal,
+                                    color = numberColor(day, colors),
+                                )
+                            }
+                            if (flight) FlightMark(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp))
                         }
                     }
                 }
@@ -413,12 +421,29 @@ fun YearRows(
                                     .then(if (selection.has(date)) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
                                     .then(if (date == today) Modifier.border(1.5.dp, MaterialTheme.colorScheme.onSurface, shape) else Modifier)
                                     .dayCell(date, hits, callbacks, describeDay(date, day, book, today)),
-                            )
+                                contentAlignment = Alignment.TopCenter,
+                            ) {
+                                if (book?.flightsOn(date)?.isNotEmpty() == true) FlightMark(Modifier.padding(top = 1.dp))
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * A flight day in the year view: a tiny plane on a disc of the page's colour, so it reads the
+ * same on any country's colour, light or dark. The month view draws the plane without the disc.
+ */
+@Composable
+fun FlightMark(modifier: Modifier = Modifier, size: Dp = 12.dp) {
+    Box(
+        modifier.size(size).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerLow).clearAndSetSemantics { },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.Flight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(size - 2.dp).rotate(45f))
     }
 }
 

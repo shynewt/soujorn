@@ -291,7 +291,7 @@ private fun CountryRow(day: Day, country: String, book: DayBook?, index: Int, fr
         !day.isTravel -> if (day.kind == DayKind.INFERRED) "Assumed: you were here before and after" else "Counts as a day here"
         else -> counting.explain(day.path, CountrySet(setOf(country)), day.transit) + " here"
     }
-    val source = when {
+    val recorded = when {
         day.kind == DayKind.PLANNED -> when (day.origins[country]) {
             PlanOrigin.FLIGHT -> "From a flight"
             PlanOrigin.BETWEEN_FLIGHTS -> "Between your flights"
@@ -303,6 +303,12 @@ private fun CountryRow(day: Day, country: String, book: DayBook?, index: Int, fr
             ?: if (fromFlight) "From a flight" else null
         fromFlight -> "From a flight"
         else -> null
+    }
+    // Kept boarding passes in and out prove the day whatever recorded it, so that comes first.
+    val source = if (day.kind != DayKind.PLANNED && country in day.between) {
+        listOfNotNull("Between your two boarding passes", recorded?.replaceFirstChar(Char::lowercaseChar)).joinToString(" · ")
+    } else {
+        recorded
     }
     SegmentedListItem(
         colors = segmentedColors(onSheet = true),
