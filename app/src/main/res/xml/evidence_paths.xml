@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only kept evidence files can be opened in other apps; see the FileProvider in the manifest. -->
+<paths>
+    <files-path name="evidence" path="evidence/" />
+</paths>
