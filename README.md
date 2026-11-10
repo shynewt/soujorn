@@ -114,6 +114,7 @@ make test         # unit tests: day counting, rules, reports, country lookup, ba
 make screenshots  # renders every screen to app/build/screenshots
 make verify       # tests, debug build and lint
 make release      # shrunk, signed release APK: sojourn-<date>.apk
+make publish      # tags today's version; GitHub Actions publishes the signed APK
 ```
 
 Every build is numbered by its date and hour (`versionCode` 2026102513, `versionName`
@@ -135,6 +136,14 @@ Releases are signed with a private key that never enters the repository:
    can ever be installed over a release again.
 3. `make release` builds and signs. The password comes from `SOJOURN_KEYSTORE_PASSWORD`, then
    from `signing/release.password` if that file exists. Otherwise it asks for it.
+
+`make publish` releases through GitHub instead: it pushes a `v<date>` tag, and the
+[Release workflow](.github/workflows/release.yml) runs the tests, builds, signs with the same key
+and attaches `sojourn-<date>.apk` to a GitHub release. A second release on the same day needs an
+annotated tag of its own (`git tag -a v2026.11.10.2`) made in a later hour: the version code is
+the hour the tag was made. The workflow takes the key from the `release` environment's secrets,
+`SOJOURN_KEYSTORE_BASE64` and `SOJOURN_KEYSTORE_PASSWORD`, and refuses to publish an APK signed
+with any other certificate.
 
 </details>
 

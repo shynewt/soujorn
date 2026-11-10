@@ -1,4 +1,4 @@
-.PHONY: debug release release-key test unit verify screenshots geodata icon gradle clean docker-image
+.PHONY: debug release publish release-key test unit verify screenshots geodata icon gradle clean docker-image
 
 DOCKER_IMAGE := sojourn-build
 GRADLE_BUILD_HOME := $(CURDIR)/.gradle-build-cache
@@ -56,6 +56,15 @@ release: docker-image
 		sh -c "scripts/sign-release.sh $(UNSIGNED_APK) $(RELEASE_APK) && $(HAND_BACK) $(RELEASE_APK)"
 	@echo "Signed release: $(RELEASE_APK) (version $(VERSION_NAME), code $(VERSION_CODE))"
 	@ls -lh $(RELEASE_APK)
+
+# Tags HEAD as today's version and pushes the tag; GitHub Actions then tests, builds, signs
+# and publishes it as a release.
+publish:
+	@git diff --quiet HEAD || { echo "Commit or stash your changes first"; exit 1; }
+	@git fetch --quiet origin main && git merge-base --is-ancestor HEAD origin/main || { echo "Push HEAD to main first"; exit 1; }
+	@! git rev-parse -q --verify refs/tags/v$(VERSION_NAME) >/dev/null || { echo "v$(VERSION_NAME) exists; tag a later release by hand, e.g. git tag -a v$(VERSION_NAME).2"; exit 1; }
+	git tag -a v$(VERSION_NAME) -m "Sojourn $(VERSION_NAME)"
+	git push origin v$(VERSION_NAME)
 
 # Creates the release key. Run once, then back up signing/release.jks and its password.
 release-key: docker-image

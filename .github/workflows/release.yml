@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    env:
+      # Every published release must carry this certificate: Android refuses an update signed
+      # with any other, so a wrong key would strand every installed copy.
+      RELEASE_CERT_SHA256: d86d3cb67608cab9a76198caa3cbc3124d41bcf1cb3f198ba76ba23c1ebaf333
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: gradle/actions/wrapper-validation@7296c772c13d12d9871528814b51fb2143c138ef # v6.4.1
+
+      # The version code is the hour the tag was made, in the zone local builds count in, so a
+      # re-run builds the same code and each later tag installs over the one before.
+      - name: Version
+        run: |
+          git fetch --quiet --force --no-tags origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          tagged=$(TZ=Europe/Athens git for-each-ref --format='%(taggerdate:format-local:%Y%m%d%H)' "refs/tags/$GITHUB_REF_NAME")
+          if [ -z "$tagged" ]; then
+            echo "::error::$GITHUB_REF_NAME is not an annotated tag; create it with make publish"
+            exit 1
+          fi
+          echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$tagged" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .gradle-build-cache
+          key: gradle-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties', '**/*.gradle.kts') }}
+          restore-keys: gradle-
+
+      - name: Build image
+        run: docker build -t sojourn-build .
+
+      - name: Test and build
+        run: |
+          docker run --rm -u 0:0 -v "$PWD":/project -w /project -e GRADLE_USER_HOME=/project/.gradle-build-cache sojourn-build \
+            ./gradlew --no-daemon -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME" testDebugUnitTest assembleRelease
+          sudo chown -R "$(id -u):$(id -g)" .gradle-build-cache app/build
+
+      - name: Sign
+        env:
+          SOJOURN_KEYSTORE_BASE64: ${{ secrets.SOJOURN_KEYSTORE_BASE64 }}
+          SOJOURN_KEYSTORE_PASSWORD: ${{ secrets.SOJOURN_KEYSTORE_PASSWORD }}
+        run: |
+          keys="$RUNNER_TEMP/keys"
+          install -d -m 700 "$keys"
+          trap 'rm -rf "$keys"' EXIT
+          printf %s "$SOJOURN_KEYSTORE_BASE64" | base64 -d > "$keys/release.jks"
+          docker run --rm --network none -u 0:0 -e SOJOURN_KEYSTORE_PASSWORD -e SOJOURN_KEYSTORE=/keys/release.jks \
+            -v "$keys":/keys:ro -v "$PWD":/project -w /project sojourn-build \
+            scripts/sign-release.sh app/build/outputs/apk/release/app-release-unsigned.apk "sojourn-$VERSION_NAME.apk" | tee sign.log
+          signed=$(grep -m1 'certificate SHA-256 digest' sign.log | awk '{print $NF}')
+          if [ "$signed" != "$RELEASE_CERT_SHA256" ]; then
+            echo "::error::Signed with certificate $signed, expected $RELEASE_CERT_SHA256"
+            exit 1
+          fi
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "sojourn-$VERSION_NAME.apk" \
+            --title "Sojourn $VERSION_NAME" --generate-notes \
+            --notes "Version code $VERSION_CODE. Installs as an update over any earlier release."
