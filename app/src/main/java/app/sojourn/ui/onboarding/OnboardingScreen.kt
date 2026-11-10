@@ -267,7 +267,7 @@ private fun AboutYou(
 ) {
     var picking by remember { mutableStateOf<String?>(null) }
     Title("A little about you", "This picks the rules that matter to you. It stays on your phone.")
-    Text("Passports", style = MaterialTheme.typography.titleMedium)
+    Text("Citizenship", style = MaterialTheme.typography.titleMedium)
     Spacer(Modifier.height(8.dp))
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         citizenships.forEach { code ->
@@ -275,10 +275,10 @@ private fun AboutYou(
                 selected = true,
                 onClick = { onCitizenships(citizenships - code) },
                 label = { Text("${Countries.flag(code)} ${Countries.name(code)}") },
-                trailingIcon = { Icon(Icons.Rounded.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) },
+                trailingIcon = { Icon(Icons.Rounded.Close, contentDescription = "Remove ${Countries.name(code)}", modifier = Modifier.size(16.dp)) },
             )
         }
-        AssistChip(onClick = { picking = "citizenship" }, label = { Text("Add passport") }, leadingIcon = { Icon(Icons.Rounded.Add, null, Modifier.size(18.dp)) })
+        AssistChip(onClick = { picking = "citizenship" }, label = { Text("Add a country") }, leadingIcon = { Icon(Icons.Rounded.Add, null, Modifier.size(18.dp)) })
     }
     Spacer(Modifier.height(20.dp))
     Text("Residence permits", style = MaterialTheme.typography.titleMedium)
@@ -294,7 +294,7 @@ private fun AboutYou(
                 selected = true,
                 onClick = { onPermits(permits - code) },
                 label = { Text("${Countries.flag(code)} ${Countries.name(code)}") },
-                trailingIcon = { Icon(Icons.Rounded.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) },
+                trailingIcon = { Icon(Icons.Rounded.Close, contentDescription = "Remove ${Countries.name(code)}", modifier = Modifier.size(16.dp)) },
             )
         }
         AssistChip(onClick = { picking = "permit" }, label = { Text("Add permit") }, leadingIcon = { Icon(Icons.Rounded.Add, null, Modifier.size(18.dp)) })
@@ -339,11 +339,17 @@ private fun AboutYou(
     }
     Spacer(Modifier.height(8.dp))
     Text("More rules, like visa-free stays, can be added later.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(4.dp))
+    Text(
+        "To bring in past trips from calendar flights, boarding passes or photos, use the + button on Today.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 
     picking?.let { which ->
         CountryPickerSheet(
             title = when (which) {
-                "citizenship" -> "Add a passport"
+                "citizenship" -> "Citizenship"
                 "permit" -> "Add a residence permit"
                 else -> "Tax residence"
             },

@@ -60,7 +60,7 @@ class ScreensScreenshotTest {
     }
 
     private fun home(dark: Boolean, year: Int? = Sample.today.year) = compose.screenshot(if (year == null) "home_all" else if (dark) "home_dark" else "home_light", dark) {
-        HomeContent(homeState(Sample.book, Sample.statuses, settings, year), Sample.map, {}, {}, {}, {}, {})
+        WithCountryColors { HomeContent(homeState(Sample.book, Sample.statuses, settings, year), Sample.map, {}, {}, {}) }
     }
 
     @Test fun homeLight() = home(dark = false)
@@ -74,7 +74,7 @@ class ScreensScreenshotTest {
         // An American with a Portuguese residence permit: Schengen counts, but not Portugal.
         val traveller = app.sojourn.domain.Traveller(citizenships = setOf("US"), residencePermits = setOf("PT"))
         val statuses = Sample.rules.map { app.sojourn.domain.RuleEngine.evaluate(it, Sample.book, traveller) }.sortedBy { !it.applies }
-        HomeContent(homeState(Sample.book, statuses, settings.copy(usTaxpayer = true), Sample.today.year), Sample.map, {}, {}, {}, {}, {})
+        WithCountryColors { HomeContent(homeState(Sample.book, statuses, settings.copy(usTaxpayer = true), Sample.today.year), Sample.map, {}, {}, {}) }
     }
 
     private val noFinish: (app.sojourn.ui.onboarding.OnboardingAnswers) -> Unit = {}
