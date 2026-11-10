@@ -24,15 +24,6 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** The sample's countries in the one palette, ranked by days, as the shell provides them. */
-@Composable
-fun WithCountryColors(content: @Composable () -> Unit) {
-    val book = Sample.book
-    val years = book.years()
-    val ranked = book.summary(LocalDate.of(years.min(), 1, 1), LocalDate.of(years.max(), 12, 31)).countries.sortedByDescending { it.total }.map { it.country }
-    CompositionLocalProvider(LocalCountryColors provides CountryPalette.assign(ranked)) { content() }
-}
-
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = PHONE, application = Application::class)
