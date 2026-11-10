@@ -5,7 +5,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,24 +17,31 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AddCircleOutline
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
+import androidx.compose.material.icons.rounded.TableRows
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
@@ -46,10 +52,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,7 +73,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
@@ -83,36 +84,43 @@ import app.sojourn.data.CalendarView
 import app.sojourn.data.Countries
 import app.sojourn.data.RangeEdit
 import app.sojourn.data.db.Document
-import app.sojourn.data.db.Flight
+import app.sojourn.domain.DateRange
 import app.sojourn.domain.DayBook
 import app.sojourn.domain.DayKind
+import app.sojourn.ui.CalendarRequest
+import app.sojourn.ui.LocalAppActions
+import app.sojourn.ui.LocalCalendarRequests
+import app.sojourn.ui.LocalCountryColors
 import app.sojourn.ui.appViewModel
 import app.sojourn.ui.components.ChoiceGroup
 import app.sojourn.ui.components.CountryPickerSheet
 import app.sojourn.ui.components.Format
-import app.sojourn.ui.flights.FlightEditorSheet
-import app.sojourn.ui.theme.CountryPalette
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
 import java.time.temporal.WeekFields
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 private val FIRST_MONTH: YearMonth = YearMonth.of(2000, 1)
 private const val MONTH_COUNT = 1212
 
+private fun pageOf(date: LocalDate) = ChronoUnit.MONTHS.between(FIRST_MONTH, YearMonth.from(date)).toInt()
+
 @Composable
 fun CalendarScreen() {
     val vm = appViewModel { CalendarViewModel(it) }
     val book by vm.book.collectAsStateWithLifecycle()
+    val stays by vm.stays.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val documents by vm.documents.collectAsStateWithLifecycle()
     val locale = LocalConfiguration.current.locales[0]
     val firstDay = if (settings.weekStart in 1..7) DayOfWeek.of(settings.weekStart) else WeekFields.of(locale).firstDayOfWeek
-    val lastEdit by vm.lastEdit.collectAsStateWithLifecycle()
-    val documents by vm.documents.collectAsStateWithLifecycle()
-    CalendarContent(book, firstDay, vm, settings.calendarView, lastEdit?.message, documents)
+    val shell = LocalCalendarRequests.current
+    val request by (shell?.calendarRequests ?: remember { MutableStateFlow(null) }).collectAsStateWithLifecycle()
+    CalendarContent(book, stays, firstDay, vm, settings.calendarView, documents, request, onRequestHandled = { shell?.calendarHandled() })
 }
 
 /** Recorded days in a range that hold a country other than [keep]: what setting [keep] would overwrite. */
@@ -132,19 +140,45 @@ private fun overwrittenText(counts: Map<String, Int>): String =
 /** The range being picked, and which change the user chose for it. */
 private enum class Pending { SET, ADD, REMOVE }
 
+/**
+ * The three ways to look at the days. The year's two layouts (month cards, a row per month) are
+ * one choice inside Year rather than two more buttons: they show the same thing at two densities.
+ */
+private enum class Mode(val label: String) { MONTH("Month"), YEAR("Year"), LIST("List") }
+
+private val CalendarView.mode: Mode
+    get() = when (this) {
+        CalendarView.MONTH -> Mode.MONTH
+        CalendarView.GRID, CalendarView.COMPACT, CalendarView.ROWS -> Mode.YEAR
+        CalendarView.LIST -> Mode.LIST
+    }
+
+/**
+ * The record of days as a month, a year or the list of stays, all opening the same day sheet.
+ * Long-press and drag in the month or year selects a range for the floating toolbar. Other
+ * screens send [request]s here to show a day or the list; each is acknowledged once acted on.
+ */
 @Composable
 fun CalendarContent(
     book: DayBook?,
+    stays: StayListState,
     firstDay: DayOfWeek,
     actions: CalendarActions,
     view: CalendarView = CalendarView.MONTH,
-    lastEdit: String? = null,
     documents: List<Document> = emptyList(),
+    request: CalendarRequest? = null,
+    onRequestHandled: () -> Unit = {},
 ) {
+    val app = LocalAppActions.current
     val today = book?.today ?: LocalDate.now()
-    val todayPage = ChronoUnit.MONTHS.between(FIRST_MONTH, YearMonth.from(today)).toInt()
+    val todayPage = pageOf(today)
     val pager = rememberPagerState(initialPage = todayPage) { MONTH_COUNT }
+    val list = rememberLazyListState()
     var year by rememberSaveable { mutableIntStateOf(today.year) }
+    // The year layout last used, so Year comes back as it was after a visit to Month or List.
+    var rows by rememberSaveable { mutableStateOf(view == CalendarView.ROWS) }
+    LaunchedEffect(view) { if (view.mode == Mode.YEAR) rows = view == CalendarView.ROWS }
+    val mode = view.mode
     val scope = rememberCoroutineScope()
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -153,18 +187,40 @@ fun CalendarContent(
     var openDay by remember { mutableStateOf<LocalDate?>(null) }
     var pending by remember { mutableStateOf<Pending?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
-    var editingFlight by remember { mutableStateOf<Flight?>(null) }
     var confirmSet by remember { mutableStateOf<String?>(null) }
-    val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(lastEdit) {
-        val message = lastEdit ?: return@LaunchedEffect
-        val result = snackbar.showSnackbar(message, actionLabel = "Undo", withDismissAction = true, duration = SnackbarDuration.Long)
-        if (result == SnackbarResult.ActionPerformed) actions.undo() else actions.dismissUndo()
-    }
+    var filling by remember { mutableStateOf<DateRange?>(null) }
+    var stay by remember { mutableStateOf<StayItem?>(null) }
+    var legend by remember { mutableStateOf(false) }
     val selection: Selection? = anchor?.let { a -> (end ?: a).let { e -> if (e < a) e to a else a to e } }
     fun clearSelection() {
         anchor = null
         end = null
+    }
+
+    fun show(next: Mode) {
+        clearSelection()
+        actions.setView(
+            when (next) {
+                Mode.MONTH -> CalendarView.MONTH
+                Mode.YEAR -> if (rows) CalendarView.ROWS else CalendarView.GRID
+                Mode.LIST -> CalendarView.LIST
+            },
+        )
+    }
+
+    LaunchedEffect(request) {
+        val asked = request ?: return@LaunchedEffect
+        val day = asked.day
+        when {
+            asked.list -> if (mode != Mode.LIST) show(Mode.LIST)
+            day != null -> {
+                if (mode != Mode.MONTH) show(Mode.MONTH)
+                year = day.year
+                pager.requestScrollToPage(pageOf(day))
+                openDay = day
+            }
+        }
+        onRequestHandled()
     }
 
     val hits = remember { DayHitTest() }
@@ -181,7 +237,6 @@ fun CalendarContent(
 
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text("Calendar", style = MaterialTheme.typography.titleLargeEmphasized) },
@@ -189,23 +244,45 @@ fun CalendarContent(
                 actions = {
                     IconButton(onClick = {
                         year = today.year
-                        scope.launch { pager.animateScrollToPage(todayPage) }
+                        scope.launch {
+                            when (mode) {
+                                Mode.MONTH -> pager.animateScrollToPage(todayPage)
+                                Mode.YEAR -> Unit
+                                Mode.LIST -> list.animateScrollToItem(stays.nowIndex())
+                            }
+                        }
                     }) { Icon(Icons.Rounded.Today, contentDescription = "Go to today") }
+                    IconButton(onClick = { legend = true }) { Icon(Icons.AutoMirrored.Rounded.HelpOutline, contentDescription = "How to read the calendar") }
                 },
             )
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(Modifier.fillMaxSize()) {
-                ChoiceGroup(
-                    CalendarView.entries.map { it to it.label },
-                    view,
-                    actions::setView,
-                    Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-                when (view) {
-                    CalendarView.MONTH -> MonthView(book, firstDay, today, pager, selection, hits, callbacks, Modifier.weight(1f))
-                    else -> YearView(view, year, { year = it }, book, firstDay, today, selection, hits, callbacks, Modifier.weight(1f))
+                ChoiceGroup(Mode.entries.map { it to it.label }, mode, ::show, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                when (mode) {
+                    Mode.MONTH -> MonthView(book, firstDay, today, pager, selection, hits, callbacks, onUntracked = { show(Mode.LIST) }, Modifier.weight(1f))
+                    Mode.YEAR -> YearView(
+                        rows = rows,
+                        onRows = { actions.setView(if (it) CalendarView.ROWS else CalendarView.GRID) },
+                        year = year,
+                        onYear = { year = it },
+                        book = book,
+                        firstDay = firstDay,
+                        today = today,
+                        selection = selection,
+                        hits = hits,
+                        callbacks = callbacks,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Mode.LIST -> StayListView(
+                        stays,
+                        list,
+                        onFill = { filling = it },
+                        onStay = { stay = it },
+                        onCrossing = { crossing -> crossing.flights.singleOrNull()?.let { app.flight(it) } ?: run { openDay = crossing.date } },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
 
@@ -242,22 +319,32 @@ fun CalendarContent(
         }
     }
 
-    openDay?.let { date ->
-        DaySheet(date = date, book = book, actions = actions, onDismiss = { openDay = null }, onFlight = { editingFlight = it }, documents = documents)
-    }
-    editingFlight?.let { flight ->
-        FlightEditorSheet(
-            initial = flight,
-            recentAirports = book?.flights.orEmpty().asReversed().flatMap { listOf(it.destination, it.origin) }.distinct().take(8),
-            preview = actions::previewFlight,
-            onDismiss = { editingFlight = null },
-            onSave = {
-                actions.saveFlight(it)
-                editingFlight = null
+    openDay?.let { date -> DaySheet(date = date, book = book, actions = actions, onDismiss = { openDay = null }, documents = documents) }
+    if (legend) LegendSheet(onDismiss = { legend = false })
+    filling?.let { gap ->
+        CountryPickerSheet(
+            title = "Where were you, ${Format.range(gap.start, gap.end, today)}?",
+            suggestions = stays.recents,
+            onDismiss = { filling = null },
+            onPick = {
+                actions.edit(gap.start, gap.end, RangeEdit.SET, it)
+                filling = null
             },
-            onDelete = {
-                actions.deleteFlight(it)
-                editingFlight = null
+        )
+    }
+    stay?.let { item ->
+        StaySheet(
+            stay = item,
+            recents = stays.recents,
+            today = today,
+            onDismiss = { stay = null },
+            onChange = {
+                actions.changeStay(item.leg, it)
+                stay = null
+            },
+            onRemove = {
+                actions.edit(item.leg.start, item.leg.end, RangeEdit.REMOVE, item.leg.country)
+                stay = null
             },
         )
     }
@@ -364,15 +451,27 @@ private fun ToolbarButton(icon: ImageVector, label: String, onClick: () -> Unit)
     TooltipIcon(label) { IconButton(onClick = onClick) { Icon(icon, contentDescription = label) } }
 }
 
+/** How to pick several days, said once under the month or year it applies to. */
+@Composable
+private fun RangeHint(modifier: Modifier = Modifier) {
+    Text(
+        "Long-press a day and drag to select several.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+    )
+}
+
 @Composable
 private fun MonthView(
     book: DayBook?,
     firstDay: DayOfWeek,
     today: LocalDate,
-    pager: androidx.compose.foundation.pager.PagerState,
+    pager: PagerState,
     selection: Selection?,
     hits: DayHitTest,
     callbacks: DayGestureCallbacks,
+    onUntracked: () -> Unit,
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -412,21 +511,17 @@ private fun MonthView(
             }
         }
         Spacer(Modifier.height(16.dp))
-        MonthSummary(book, month, today)
-        Text(
-            "Long-press a day and drag to select several. Then set, add or take off a country on all of them.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp),
-        )
+        MonthSummary(book, month, today, onUntracked)
+        RangeHint(Modifier.padding(horizontal = 8.dp, vertical = 16.dp))
         Spacer(Modifier.height(96.dp))
     }
 }
 
-/** A year at a glance, as month cards (Grid, Compact) or a row per month (Rows). */
+/** A year at a glance, as month cards or a row per month. */
 @Composable
 private fun YearView(
-    view: CalendarView,
+    rows: Boolean,
+    onRows: (Boolean) -> Unit,
     year: Int,
     onYear: (Int) -> Unit,
     book: DayBook?,
@@ -440,28 +535,32 @@ private fun YearView(
     val from = LocalDate.of(year, 1, 1)
     val to = LocalDate.of(year, 12, 31)
     val summary = remember(book, year) { book?.summary(from, to) }
-    val ranked = summary?.countries.orEmpty().sortedByDescending { it.total }
-    val colors = remember(ranked) { CountryPalette.assign(ranked.map { it.country }) }
-    val legend = ranked.map { Triple(it.country, colors.getValue(it.country), it.total) }
+    val colors = LocalCountryColors.current
+    val other = MaterialTheme.colorScheme.outline
+    val legend = summary?.countries.orEmpty().sortedByDescending { it.total }.map { Triple(it.country, colors[it.country] ?: other, it.total) }
     val header: @Composable () -> Unit = {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { onYear(year - 1) }) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous year") }
                 Text("$year", style = MaterialTheme.typography.headlineSmallEmphasized, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
                 IconButton(onClick = { onYear(year + 1) }) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next year") }
+                IconButton(onClick = { onRows(!rows) }) {
+                    Icon(
+                        if (rows) Icons.Rounded.GridView else Icons.Rounded.TableRows,
+                        contentDescription = if (rows) "Show months as cards" else "Show months as rows",
+                    )
+                }
             }
             YearLegend(legend, Modifier.padding(bottom = 8.dp))
         }
     }
     val footer: @Composable () -> Unit = {
-        Text(
-            "Each colour is a country. Travel days are split corner to corner, from where the day started to where it ended; planned days are pale with a dashed edge, and striped days are assumed (nothing recorded, the same country before and after). Long-press and drag to select days.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp, bottom = 112.dp),
-        )
+        Column(Modifier.padding(top = 8.dp, bottom = 112.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            DayKey()
+            RangeHint()
+        }
     }
-    if (view == CalendarView.ROWS) {
+    if (rows) {
         Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
             header()
             Box(Modifier.dayGestures(hits, callbacks)) { YearRows(year, book, today, colors, selection, hits, callbacks) }
@@ -469,73 +568,56 @@ private fun YearView(
         }
         return
     }
-    val compact = view == CalendarView.COMPACT
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(if (compact) 104.dp else 160.dp),
+        columns = GridCells.Adaptive(160.dp),
         modifier = modifier.fillMaxWidth().dayGestures(hits, callbacks),
         contentPadding = PaddingValues(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
-        verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) { header() }
         items((1..12).map { YearMonth.of(year, it) }, key = { it.toString() }) { month ->
-            MonthCard(month, firstDay, book, today, colors, selection, compact, hits, callbacks)
+            MonthCard(month, firstDay, book, today, colors, selection, hits, callbacks)
         }
         item(span = { GridItemSpan(maxLineSpan) }) { footer() }
     }
 }
 
+/** The month's days per country, and its untracked days as a way into the list to fill them in. */
 @Composable
-private fun MonthSummary(book: DayBook?, month: YearMonth, today: LocalDate) {
+private fun MonthSummary(book: DayBook?, month: YearMonth, today: LocalDate, onUntracked: () -> Unit) {
     book ?: return
     val summary = remember(book, month) { book.summary(month.atDay(1), month.atEndOfMonth()) }
     val untracked = remember(book, month) { if (book.isEmpty) 0 else book.gaps(maxOf(month.atDay(1), book.firstRecorded ?: today), month.atEndOfMonth()).sumOf { it.days } }
-    val assumed = remember(book, month) { book.between(month.atDay(1), month.atEndOfMonth()).count { it.kind == DayKind.INFERRED } }
-    val faded = remember(book, month) {
-        book.between(month.atDay(1), month.atEndOfMonth()).any { day -> day.countries.any { it !in day.transit && !book.countsFor(it, day) } }
-    }
     if (summary.countries.isEmpty() && untracked == 0) return
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(horizontal = 4.dp),
     ) {
         summary.countries.forEach { item ->
-            Row(
-                Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 10.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(Countries.flag(item.country))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    buildString {
-                        append(item.days)
-                        if (item.planned > 0) append(" + ${item.planned} planned")
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                )
+            Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                Row(Modifier.padding(start = 10.dp, end = 14.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(Countries.flag(item.country))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        buildString {
+                            append(item.days)
+                            if (item.planned > 0) append(" + ${item.planned} planned")
+                        },
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
             }
         }
         if (untracked > 0) {
-            Box(Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.tertiaryContainer).padding(horizontal = 14.dp, vertical = 6.dp)) {
-                Text("$untracked untracked", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onTertiaryContainer)
+            Surface(onClick = onUntracked, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer) {
+                Row(Modifier.padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("$untracked untracked", style = MaterialTheme.typography.labelLarge)
+                    Icon(Icons.Rounded.ChevronRight, contentDescription = "Fill in from the list", modifier = Modifier.size(18.dp))
+                }
             }
         }
-    }
-    if (assumed > 0) {
-        Text(
-            "Striped days with a pale flag are assumed: nothing was recorded, and you were in the same country before and after. ${if (assumed == 1) "1 day" else "$assumed days"} this month. Tap one to confirm it or say where you were.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp),
-        )
-    }
-    if (faded) {
-        Text(
-            "Faint flags: you were there, but that country doesn't count the day, like the day you leave Cyprus. Days are counted the way each country counts them.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-        )
     }
 }

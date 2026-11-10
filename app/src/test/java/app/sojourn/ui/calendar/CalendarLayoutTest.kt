@@ -31,14 +31,14 @@ class CalendarLayoutTest {
     val compose = createComposeRule()
 
     @Test
-    fun compactDayNumbersFitInsideTheirTiles() {
+    fun dayNumbersFitInsideTheirTilesAtTheNarrowestCard() {
         compose.setContent {
             SojournTheme(dynamicColor = false) {
-                Box(Modifier.width(120.dp)) {
+                Box(Modifier.width(160.dp)) {
                     MonthCard(
                         month = YearMonth.of(2026, 11), firstDay = DayOfWeek.MONDAY,
                         book = null, today = LocalDate.of(2026, 10, 25), colors = emptyMap(),
-                        selection = null, compact = true, hits = DayHitTest(),
+                        selection = null, hits = DayHitTest(),
                         callbacks = DayGestureCallbacks({}, {}, {}),
                     )
                 }

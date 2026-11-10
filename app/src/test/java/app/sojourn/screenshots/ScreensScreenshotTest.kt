@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import app.sojourn.ui.calendar.CalendarActions
 import app.sojourn.ui.components.WorldMap
 import app.sojourn.ui.calendar.CalendarContent
+import app.sojourn.ui.calendar.stayList
 import app.sojourn.ui.home.HomeContent
 import app.sojourn.ui.imports.ImportSources
 import app.sojourn.ui.home.homeState
@@ -28,8 +29,6 @@ import app.sojourn.ui.onboarding.OnboardingContent
 import app.sojourn.ui.onboarding.SojournMark
 import app.sojourn.ui.plan.PlanContent
 import app.sojourn.ui.plan.planState
-import app.sojourn.ui.timeline.TimelineContent
-import app.sojourn.ui.timeline.timelineState
 import app.sojourn.data.CalendarView
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -59,6 +58,10 @@ class ScreensScreenshotTest {
         override fun edit(from: LocalDate, to: LocalDate, edit: app.sojourn.data.RangeEdit, country: String?) = Unit
     }
 
+    private fun calendar(name: String, view: CalendarView = CalendarView.MONTH, dark: Boolean = false) = compose.screenshot(name, dark) {
+        WithCountryColors { CalendarContent(Sample.book, stayList(Sample.book), DayOfWeek.MONDAY, noCalendar, view) }
+    }
+
     private fun home(dark: Boolean, year: Int? = Sample.today.year) = compose.screenshot(if (year == null) "home_all" else if (dark) "home_dark" else "home_light", dark) {
         HomeContent(homeState(Sample.book, Sample.statuses, settings, year), Sample.map, {}, {}, {}, {}, {})
     }
@@ -79,15 +82,15 @@ class ScreensScreenshotTest {
 
     private val noFinish: (app.sojourn.ui.onboarding.OnboardingAnswers) -> Unit = {}
 
-    @Test fun calendar() = compose.screenshot("calendar") { CalendarContent(Sample.book, DayOfWeek.MONDAY, noCalendar) }
+    @Test fun calendar() = calendar("calendar")
 
-    @Test fun calendarDark() = compose.screenshot("calendar_dark", dark = true) { CalendarContent(Sample.book, DayOfWeek.MONDAY, noCalendar) }
+    @Test fun calendarDark() = calendar("calendar_dark", dark = true)
 
-    @Test fun calendarGrid() = compose.screenshot("calendar_grid") { CalendarContent(Sample.book, DayOfWeek.MONDAY, noCalendar, CalendarView.GRID) }
+    @Test fun calendarGrid() = calendar("calendar_grid", CalendarView.GRID)
 
-    @Test fun calendarCompactDark() = compose.screenshot("calendar_compact_dark", dark = true) { CalendarContent(Sample.book, DayOfWeek.MONDAY, noCalendar, CalendarView.COMPACT) }
+    @Test fun calendarGridDark() = calendar("calendar_grid_dark", CalendarView.GRID, dark = true)
 
-    @Test fun calendarRows() = compose.screenshot("calendar_rows") { CalendarContent(Sample.book, DayOfWeek.MONDAY, noCalendar, CalendarView.ROWS) }
+    @Test fun calendarRows() = calendar("calendar_rows", CalendarView.ROWS)
 
     @Test
     fun residencyCards() = compose.screenshot("rules_residency") {
@@ -154,9 +157,9 @@ class ScreensScreenshotTest {
 
     @Test fun planDark() = plan("plan_dark", dark = true)
 
-    @Test fun timeline() = compose.screenshot("timeline") { TimelineContent(timelineState(Sample.book), {}, {}) }
+    @Test fun calendarList() = calendar("calendar_list", CalendarView.LIST)
 
-    @Test fun timelineDark() = compose.screenshot("timeline_dark", dark = true) { TimelineContent(timelineState(Sample.book), {}, {}) }
+    @Test fun calendarListDark() = calendar("calendar_list_dark", CalendarView.LIST, dark = true)
 
     @Test fun onboardingWelcome() = compose.screenshot("onboarding_1") { OnboardingContent(noFinish) }
 
