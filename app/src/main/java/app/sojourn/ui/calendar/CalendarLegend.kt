@@ -16,9 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Flight
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -29,7 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -124,15 +120,25 @@ fun LegendContent(onCounting: () -> Unit) {
             "You were there, but that country doesn't count the day under its own rules, like the day you leave Cyprus.",
         ) { TextButton(onClick = onCounting, contentPadding = PaddingValues(0.dp)) { Text("Counting settings") } }
         Entry(
-            { Icon(Icons.Rounded.Flight, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp).rotate(45f)) },
+            { FlightSwatch() },
             "Flights",
-            "A day with a flight. Tap the day to open it.",
+            "A day with a flight. The month shows a small plane in the day; the year puts one on the corner of the day's tile. Tap the day to open it.",
         )
         Entry(
             { Box(Modifier.size(20.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.secondaryContainer)) },
             "Several days at once",
             "Long-press a day and drag. Then set, add or take off a country on all of them.",
         )
+    }
+}
+
+/** A day tile with the year view's flight mark on its corner. */
+@Composable
+private fun FlightSwatch() {
+    val color = MaterialTheme.colorScheme.primary
+    Box(Modifier.size(24.dp)) {
+        Box(Modifier.align(Alignment.BottomStart).size(20.dp).clip(RoundedCornerShape(4.dp)).background(color.copy(alpha = 0.9f)))
+        FlightMark(Modifier.align(Alignment.TopEnd), size = 12.dp)
     }
 }
 

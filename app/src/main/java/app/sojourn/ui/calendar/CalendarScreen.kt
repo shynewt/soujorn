@@ -92,9 +92,11 @@ import app.sojourn.ui.LocalAppActions
 import app.sojourn.ui.LocalCalendarRequests
 import app.sojourn.ui.LocalCountryColors
 import app.sojourn.ui.appViewModel
+import app.sojourn.ui.countryColor
 import app.sojourn.ui.components.ChoiceGroup
 import app.sojourn.ui.components.CountryPickerSheet
 import app.sojourn.ui.components.Format
+import app.sojourn.ui.components.YearMenu
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -273,6 +275,7 @@ fun CalendarContent(
                         selection = selection,
                         hits = hits,
                         callbacks = callbacks,
+                        onUntracked = { show(Mode.LIST) },
                         modifier = Modifier.weight(1f),
                     )
                     Mode.LIST -> StayListView(
@@ -530,20 +533,35 @@ private fun YearView(
     selection: Selection?,
     hits: DayHitTest,
     callbacks: DayGestureCallbacks,
+    onUntracked: () -> Unit,
     modifier: Modifier,
 ) {
     val from = LocalDate.of(year, 1, 1)
     val to = LocalDate.of(year, 12, 31)
     val summary = remember(book, year) { book?.summary(from, to) }
-    val colors = LocalCountryColors.current
+    // Countries only planned so far have no ranked colour yet; give them the steady one the
+    // forecast bar uses, so the grid, the chips and the bar agree.
+    val ranked = LocalCountryColors.current
+    val colors = ranked + summary?.countries.orEmpty().filter { it.country !in ranked }.associate { it.country to countryColor(it.country) }
     val other = MaterialTheme.colorScheme.outline
     val legend = summary?.countries.orEmpty().sortedByDescending { it.total }.map { Triple(it.country, colors[it.country] ?: other, it.total) }
+    // Every year with days, and the next one to plan in; the menu scrolls, so ten years fit.
+    val years = remember(book) {
+        val known = book?.years() ?: listOf(today.year)
+        (maxOf(known.max(), today.year + 1) downTo known.min()).toList()
+    }
     val header: @Composable () -> Unit = {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onYear(year - 1) }) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous year") }
-                Text("$year", style = MaterialTheme.typography.headlineSmallEmphasized, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-                IconButton(onClick = { onYear(year + 1) }) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next year") }
+                IconButton(onClick = { onYear(year - 1) }, enabled = year > years.last()) {
+                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous year")
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    YearMenu(year, (years + year).distinct(), onYear = { it?.let(onYear) })
+                }
+                IconButton(onClick = { onYear(year + 1) }, enabled = year < years.first()) {
+                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next year")
+                }
                 IconButton(onClick = { onRows(!rows) }) {
                     Icon(
                         if (rows) Icons.Rounded.GridView else Icons.Rounded.TableRows,
@@ -556,6 +574,7 @@ private fun YearView(
     }
     val footer: @Composable () -> Unit = {
         Column(Modifier.padding(top = 8.dp, bottom = 112.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            book?.let { YearForecastCard(it, year, onUntracked) }
             DayKey()
             RangeHint()
         }

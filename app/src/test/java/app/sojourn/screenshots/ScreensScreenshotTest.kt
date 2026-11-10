@@ -90,6 +90,8 @@ class ScreensScreenshotTest {
 
     @Test fun calendarRows() = calendar("calendar_rows", CalendarView.ROWS)
 
+    @Test fun calendarRowsDark() = calendar("calendar_rows_dark", CalendarView.ROWS, dark = true)
+
     @Test
     fun residencyCards() = compose.screenshot("rules_residency") {
         androidx.compose.foundation.layout.Column(
