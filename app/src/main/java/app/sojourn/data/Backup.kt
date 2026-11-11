@@ -20,14 +20,43 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class BackupFile(
     val app: String = "sojourn",
-    val version: Int = 1,
+    val version: Int = BackupFile.VERSION,
     val exportedAt: String,
     val days: List<DayDto>,
     val plans: List<PlanDto>,
     val rules: List<RuleDto>,
     val settings: Settings? = null,
     val flights: List<FlightDto> = emptyList(),
+    val documents: List<DocumentDto> = emptyList(),
+) {
+    /** Backups before version 2 carried no evidence, so restoring one leaves the evidence alone. */
+    val hasEvidence: Boolean get() = version >= 2
+
+    companion object {
+        const val VERSION = 2
+    }
+}
+
+@Serializable
+data class DocumentDto(
+    val day: String,
+    val until: String? = null,
+    val country: String,
+    val kind: String,
+    val title: String,
+    val note: String = "",
+    val text: String = "",
+    /** Its file inside the backup, e.g. "evidence/boarding-passes/2026-01-12_ES.pdf". */
+    val file: String? = null,
+    /** Where a photo was in the gallery of the phone that made the backup. */
+    val photo: String? = null,
+    val photoChoices: List<String> = emptyList(),
+    val flight: FlightKeyDto? = null,
+    val addedAt: Long? = null,
 )
+
+@Serializable
+data class FlightKeyDto(val number: String, val origin: String, val destination: String, val departureDate: String)
 
 @Serializable
 data class FlightDto(
@@ -84,7 +113,14 @@ object BackupCodec {
         encodeDefaults = true
     }
 
-    fun encode(presence: List<Presence>, plans: List<Plan>, rules: List<Rule>, settings: Settings, flights: List<Flight> = emptyList()): String = json.encodeToString(
+    fun encode(
+        presence: List<Presence>,
+        plans: List<Plan>,
+        rules: List<Rule>,
+        settings: Settings,
+        flights: List<Flight> = emptyList(),
+        documents: List<DocumentDto> = emptyList(),
+    ): String = json.encodeToString(
         BackupFile.serializer(),
         BackupFile(
             exportedAt = Instant.now().toString(),
@@ -100,6 +136,7 @@ object BackupCodec {
                     it.reference, it.passenger, it.seat,
                 )
             },
+            documents = documents,
         ),
     )
 

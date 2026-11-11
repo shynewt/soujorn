@@ -93,9 +93,10 @@ stay found.
 - **Form 2555** (FEIE physical presence) for US filers, with the best 12-month period and the
   line 18 travel table as CSV.
 - **Home screen widget** with the current country, days there this year and the closest limit.
-- **Backups**: one readable JSON file to export or restore (merge or replace), a CSV of every
-  day, automatic weekly backups into any folder (e.g. one synced by Syncthing), and Android's
-  own backup.
+- **Backups**: one zip with everything, evidence files included, to export or restore (merge
+  or replace). Unzipped, it reads without Sojourn: CSVs of days, flights and documents, and the
+  files in a folder per kind. Automatic weekly backups go into any folder (e.g. one synced by
+  Syncthing), and Android's own backup works too.
 
 ## Private by design
 

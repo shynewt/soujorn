@@ -14,12 +14,14 @@ import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
 /**
- * Writes a dated JSON backup into a folder the user picked, e.g. one synced by Syncthing or a
+ * Writes a dated backup zip into a folder the user picked, e.g. one synced by Syncthing or a
  * cloud drive, and keeps the newest few. Nothing ever leaves the phone any other way.
  */
 object AutoBackup {
     private const val WORK = "auto-backup"
     private const val KEEP = 8
+    private const val PREFIX = "sojourn-auto-"
+    private const val PARTIAL = "sojourn-unfinished-backup"
 
     fun schedule(context: Context, settings: Settings) {
         val work = WorkManager.getInstance(context)
@@ -37,13 +39,20 @@ object AutoBackup {
         val folderUri = container.settings.current().backupFolder ?: error("No backup folder chosen")
         val folder = DocumentFile.fromTreeUri(context, folderUri.toUri()) ?: error("Backup folder is gone")
         if (!folder.canWrite()) error("Can't write to the backup folder")
-        val name = "sojourn-${LocalDate.now()}.json"
+        val name = "$PREFIX${LocalDate.now()}.zip"
+        folder.findFile("$PARTIAL.zip")?.delete()
+        // Written under another name and renamed when complete, so a failed write never replaces a good backup.
+        val file = folder.createFile("application/zip", PARTIAL) ?: error("Couldn't create the backup file")
+        runCatching {
+            context.contentResolver.openOutputStream(file.uri, "wt")?.use { container.backups.write(it) } ?: error("Couldn't open the backup file")
+        }.onFailure {
+            file.delete()
+            throw it
+        }
         folder.findFile(name)?.delete()
-        val file = folder.createFile("application/json", name.removeSuffix(".json")) ?: error("Couldn't create the backup file")
-        val json = container.repository.exportJson()
-        context.contentResolver.openOutputStream(file.uri, "wt")?.use { it.write(json.toByteArray()) } ?: error("Couldn't open the backup file")
+        check(file.renameTo(name)) { "Couldn't name the backup $name" }
         folder.listFiles()
-            .filter { it.name?.startsWith("sojourn-") == true && it.name?.endsWith(".json") == true }
+            .filter { it.name?.startsWith(PREFIX) == true && it.name?.endsWith(".zip") == true }
             .sortedByDescending { it.name }
             .drop(KEEP)
             .forEach { it.delete() }

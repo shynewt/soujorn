@@ -545,17 +545,30 @@ class Repository(
 
     suspend fun presenceRows(): List<Presence> = db.presence().all()
 
-    suspend fun exportJson(): String =
-        BackupCodec.encode(db.presence().all(), db.plans().all(), db.rules().all(), settingsStore.current(), db.flights().all())
+    suspend fun exportJson(documents: List<DocumentDto> = emptyList()): String =
+        BackupCodec.encode(db.presence().all(), db.plans().all(), db.rules().all(), settingsStore.current(), db.flights().all(), documents)
+
+    suspend fun allDocuments(): List<Document> = db.documents().all()
+
+    /** Swaps every document for [documents], then removes the kept files none of them uses. */
+    suspend fun replaceEvidence(documents: List<Document>) {
+        db.withTransaction {
+            db.documents().clearAll()
+            documents.forEach { db.documents().upsert(it) }
+        }
+        val used = documents.mapNotNullTo(HashSet()) { it.file }
+        evidenceDir?.listFiles()?.filter { it.name !in used }?.forEach { it.delete() }
+    }
 
     data class RestoreResult(val days: Int, val plans: Int, val rules: Int, val flights: Int = 0)
 
     /** Restores a backup. Merging keeps existing data and adds what's missing. */
-    suspend fun restore(json: String, replace: Boolean): RestoreResult =
-        recordChange(if (replace) "Restored a backup, replacing everything" else "Merged a backup in") { restoreNow(json, replace) }
+    suspend fun restore(json: String, replace: Boolean): RestoreResult = restore(BackupCodec.decode(json), replace)
 
-    private suspend fun restoreNow(json: String, replace: Boolean): RestoreResult {
-        val file = BackupCodec.decode(json)
+    suspend fun restore(file: BackupFile, replace: Boolean): RestoreResult =
+        recordChange(if (replace) "Restored a backup, replacing everything" else "Merged a backup in") { restoreNow(file, replace) }
+
+    private suspend fun restoreNow(file: BackupFile, replace: Boolean): RestoreResult {
         val presence = file.presence()
         val plans = file.planEntities()
         val rules = file.ruleEntities()

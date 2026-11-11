@@ -88,7 +88,7 @@ object Reports {
     fun feieCsv(report: FeieReport): String = buildString {
         appendLine("Country,Date arrived,Date left,Full days present,Days in U.S. on business,Income earned in U.S. on business")
         report.rows.forEach {
-            appendLine("${csv(Countries.name(it.country))},${it.arrived.format(usDate)},${it.left.format(usDate)},${it.fullDays},,")
+            appendLine("${Csv.field(Countries.name(it.country))},${it.arrived.format(usDate)},${it.left.format(usDate)},${it.fullDays},,")
         }
     }
 
@@ -130,9 +130,8 @@ object Reports {
         appendLine("date,country_code,country,source,also_from")
         rows.sortedWith(compareBy({ it.day }, { it.firstSeen ?: Long.MIN_VALUE })).forEach {
             val also = (it.sources - it.source).joinToString(";") { s -> s.name.lowercase() }
-            appendLine("${it.day},${it.country},${csv(Countries.name(it.country))},${it.source.name.lowercase()},$also")
+            appendLine("${it.day},${it.country},${Csv.field(Countries.name(it.country))},${it.source.name.lowercase()},$also")
         }
     }
 
-    private fun csv(value: String) = if (value.any { it == ',' || it == '"' }) "\"${value.replace("\"", "\"\"")}\"" else value
 }

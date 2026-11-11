@@ -92,6 +92,9 @@ data class SettingsExtras(
     val activeRules: Int = 0,
 )
 
+/** A backup chosen to restore, with what it holds, while the user picks merge or replace. */
+data class PendingRestore(val uri: Uri, val days: Int, val documents: Int, val hasEvidence: Boolean)
+
 /** What the settings pages can do, so they can be drawn without a view model in screenshot tests. */
 interface SettingsCommands {
     fun update(transform: (Settings) -> Settings)
@@ -100,8 +103,8 @@ interface SettingsCommands {
     fun exportSpreadsheet(uri: Uri)
 
     /** Reads a backup file, for [restore] once the user says how; null if it can't be read. */
-    suspend fun read(uri: Uri): String?
-    fun restore(json: String, replace: Boolean)
+    suspend fun read(uri: Uri): PendingRestore?
+    fun restore(backup: PendingRestore, replace: Boolean)
     fun chooseBackupFolder(uri: Uri)
     fun revert(change: Change)
     fun erase()
@@ -135,7 +138,16 @@ class SettingsViewModel(val container: AppContainer) : ViewModel(), SettingsComm
         _messages.trySend("Checking where you are…")
     }
 
-    override fun exportBackup(uri: Uri) = write(uri, "Backup saved") { repository.exportJson() }
+    override fun exportBackup(uri: Uri) {
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri, "wt")!!.use { container.backups.write(it) } } }
+                .onSuccess { written ->
+                    val left = if (written.missing.isEmpty()) "" else " · ${written.missing.size} left out, listed in its README"
+                    _messages.send("Backup saved: ${written.days} days, ${written.documents} documents$left")
+                }
+                .onFailure { _messages.send("Couldn't save: ${it.message}") }
+        }
+    }
 
     override fun exportSpreadsheet(uri: Uri) = write(uri, "Spreadsheet saved") { Reports.presenceCsv(repository.presenceRows()) }
 
@@ -148,16 +160,20 @@ class SettingsViewModel(val container: AppContainer) : ViewModel(), SettingsComm
         }
     }
 
-    override suspend fun read(uri: Uri): String? =
-        runCatching { withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() } } }
-            .onFailure { _messages.send("Couldn't read that file") }
+    override suspend fun read(uri: Uri): PendingRestore? =
+        runCatching { container.backups.read(uri) }
+            .onFailure { _messages.send("Not a Sojourn backup") }
             .getOrNull()
+            ?.let { PendingRestore(uri, it.days, it.documents, it.hasEvidence) }
 
-    override fun restore(json: String, replace: Boolean) {
+    override fun restore(backup: PendingRestore, replace: Boolean) {
         viewModelScope.launch {
-            runCatching { repository.restore(json, replace = replace) }
-                .onSuccess { _messages.send("${if (replace) "Replaced with" else "Merged"} ${it.days} days, ${it.plans} plans, ${it.rules} rules") }
-                .onFailure { _messages.send("Not a Sojourn backup") }
+            runCatching { container.backups.restore(backup.uri, replace) }
+                .onSuccess {
+                    val tables = it.tables
+                    _messages.send("${if (replace) "Replaced with" else "Merged"} ${tables.days} days, ${tables.plans} plans, ${tables.rules} rules, ${it.documents} documents")
+                }
+                .onFailure { _messages.send("Couldn't restore: ${it.message}") }
         }
     }
 

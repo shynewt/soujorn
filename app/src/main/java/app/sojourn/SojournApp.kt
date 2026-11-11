@@ -2,6 +2,7 @@ package app.sojourn
 
 import android.app.Application
 import android.content.Context
+import app.sojourn.data.BackupArchive
 import app.sojourn.data.ChangeLog
 import app.sojourn.data.EvidenceKeeper
 import app.sojourn.data.EvidenceStore
@@ -59,6 +60,7 @@ class AppContainer(context: Context) {
     val evidence: EvidenceStore by lazy { EvidenceStore(this.context, requireNotNull(repository.evidenceDir)) }
     val travel: TravelImporter by lazy { TravelImporter(this.context) { airports } }
     val keeper: EvidenceKeeper by lazy { EvidenceKeeper(repository, evidence, travel) }
+    val backups: BackupArchive by lazy { BackupArchive(this.context, repository, evidence) }
 
     /** Detailed borders, only loaded when a fix or photo needs a country. */
     val locator: CountryLocator by lazy { CountryLocator(this.context.assets.open("borders.bin").use(GeoShapes::read)) }

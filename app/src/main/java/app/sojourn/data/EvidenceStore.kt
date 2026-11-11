@@ -7,12 +7,14 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Size
+import androidx.core.net.toUri
 import app.sojourn.data.db.Document
 import app.sojourn.data.db.DocumentKind
 import app.sojourn.data.db.EvidenceGroup
 import app.sojourn.data.db.Flight
 import app.sojourn.data.flights.Airlines
 import app.sojourn.domain.DayBook
+import app.sojourn.domain.Csv
 import app.sojourn.domain.DayKind
 import app.sojourn.domain.Evidence
 import java.io.File
@@ -72,7 +74,7 @@ class EvidenceStore(private val context: Context, private val dir: File) {
     }
 
     /** The pack's folder for a kind: "boarding-passes", "utility-bills", "work"… */
-    private fun folder(kind: DocumentKind): String = when (kind) {
+    fun folder(kind: DocumentKind): String = when (kind) {
         DocumentKind.PHOTO -> "photos"
         DocumentKind.BOARDING_PASS -> "boarding-passes"
         DocumentKind.CALENDAR_EVENT -> "calendar"
@@ -132,9 +134,8 @@ class EvidenceStore(private val context: Context, private val dir: File) {
             for (doc in inYear) {
                 when (doc.kind) {
                     DocumentKind.PHOTO -> {
-                        val uri = doc.uri?.let(Uri::parse) ?: continue
                         val path = nameFor(doc, "photos", "jpg")
-                        val copied = openPhoto(uri)?.use { input -> put(path) { input.copyTo(it) }; true } ?: false
+                        val copied = openPhoto(doc)?.use { input -> put(path) { input.copyTo(it) }; true } ?: false
                         if (copied) {
                             paths[doc.id] = path
                             files++
@@ -183,6 +184,10 @@ class EvidenceStore(private val context: Context, private val dir: File) {
         PackResult(book.between(from, to).count { it.kind != DayKind.PLANNED }, files, missing)
     }
 
+    /** A photo document's picture: from the gallery, or the copy kept here when it came from a backup. */
+    private fun openPhoto(doc: Document): InputStream? =
+        doc.uri?.let { openPhoto(it.toUri()) } ?: doc.file?.let { name -> File(dir, name).takeIf { it.exists() }?.inputStream() }
+
     /** The original photo, with its location if the app may read it, else as the gallery gives it. */
     private fun openPhoto(uri: Uri): InputStream? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -200,7 +205,7 @@ class EvidenceStore(private val context: Context, private val dir: File) {
                 if (country in day.transit) continue
                 val files = byDay[day.date to country].orEmpty().mapNotNull { paths[it.id] }.distinct().joinToString(";")
                 val sources = day.sources[country].orEmpty().joinToString(";") { it.name.lowercase() }
-                append("${day.date},$country,${csv(Countries.name(country))},${if (book.countsFor(country, day)) "yes" else "no"},")
+                append("${day.date},$country,${Csv.field(Countries.name(country))},${if (book.countsFor(country, day)) "yes" else "no"},")
                 appendLine("${day.evidenceOf(country).label.lowercase()},$sources,$files")
             }
         }
@@ -300,7 +305,6 @@ class EvidenceStore(private val context: Context, private val dir: File) {
 
     private fun esc(text: String) = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
-    private fun csv(value: String) = if (value.any { it == ',' || it == '"' }) "\"${value.replace("\"", "\"\"")}\"" else value
 
     companion object {
         /** What a kept file is, by its extension, for opening it in another app. */

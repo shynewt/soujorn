@@ -26,6 +26,7 @@ import app.sojourn.ui.SettingsSection
 import app.sojourn.ui.components.RuleCard
 import app.sojourn.ui.home.HomeContent
 import app.sojourn.ui.home.homeState
+import app.sojourn.ui.settings.PendingRestore
 import app.sojourn.ui.settings.SettingsCommands
 import app.sojourn.ui.settings.SettingsContent
 import app.sojourn.ui.settings.SettingsExtras
@@ -82,8 +83,8 @@ class TodayScreenshotTest {
         override fun checkNow() = Unit
         override fun exportBackup(uri: Uri) = Unit
         override fun exportSpreadsheet(uri: Uri) = Unit
-        override suspend fun read(uri: Uri): String? = null
-        override fun restore(json: String, replace: Boolean) = Unit
+        override suspend fun read(uri: Uri): PendingRestore? = null
+        override fun restore(backup: PendingRestore, replace: Boolean) = Unit
         override fun chooseBackupFolder(uri: Uri) = Unit
         override fun revert(change: Change) = Unit
         override fun erase() = Unit

@@ -456,6 +456,9 @@ interface DocumentDao {
     @Query("SELECT * FROM documents ORDER BY day, kind, id")
     fun observeAll(): Flow<List<Document>>
 
+    @Query("SELECT * FROM documents ORDER BY day, kind, id")
+    suspend fun all(): List<Document>
+
     @Query("SELECT * FROM documents WHERE day BETWEEN :from AND :to ORDER BY day, kind, id")
     suspend fun between(from: LocalDate, to: LocalDate): List<Document>
 

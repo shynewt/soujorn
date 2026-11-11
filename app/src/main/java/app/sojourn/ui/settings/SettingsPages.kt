@@ -318,9 +318,9 @@ private fun DataPage(settings: Settings, extras: SettingsExtras, vm: SettingsCom
     val actions = LocalAppActions.current
     val scope = rememberCoroutineScope()
     var changesSheet by remember { mutableStateOf(false) }
-    var pendingRestore by remember { mutableStateOf<String?>(null) }
+    var pendingRestore by remember { mutableStateOf<PendingRestore?>(null) }
     var confirmErase by remember { mutableStateOf(false) }
-    val exportJson = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let(vm::exportBackup) }
+    val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> uri?.let(vm::exportBackup) }
     val exportCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> uri?.let(vm::exportSpreadsheet) }
     val restore = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -358,8 +358,8 @@ private fun DataPage(settings: Settings, extras: SettingsExtras, vm: SettingsCom
                 }
             },
         ) { chooseFolder.launch(null) }
-        ActionRow(1, 4, Icons.Rounded.Download, "Export backup", "Days, plans, flights, rules and settings in one file. Evidence files go in the evidence pack") { exportJson.launch("sojourn-${LocalDate.now()}.json") }
-        ActionRow(2, 4, Icons.Rounded.Upload, "Restore backup", "Merge a backup in, or replace everything") { restore.launch(arrayOf("application/json", "text/plain", "*/*")) }
+        ActionRow(1, 4, Icons.Rounded.Download, "Export backup", "Everything in one zip, evidence files included, readable on a computer too") { exportBackup.launch("sojourn-backup-${LocalDate.now()}.zip") }
+        ActionRow(2, 4, Icons.Rounded.Upload, "Restore backup", "Merge a backup in, or replace everything") { restore.launch(arrayOf("application/zip", "application/json", "text/plain", "*/*")) }
         ActionRow(3, 4, Icons.Rounded.TableChart, "Export spreadsheet", "Every day and country as CSV") { exportCsv.launch("sojourn-days-${LocalDate.now()}.csv") }
     }
     Spacer(Modifier.size(16.dp))
@@ -375,16 +375,25 @@ private fun DataPage(settings: Settings, extras: SettingsExtras, vm: SettingsCom
     ) { Text("Erase all data", color = MaterialTheme.colorScheme.error) }
 
     if (changesSheet) RecentChangesSheet(changes = changes, onDismiss = { changesSheet = false }, onRevert = vm::revert)
-    pendingRestore?.let { json ->
+    pendingRestore?.let { backup ->
         var replace by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { pendingRestore = null },
             title = { Text("Restore backup") },
             text = {
                 Column(Modifier.selectableGroup()) {
+                    Text(
+                        if (backup.hasEvidence) "It holds ${backup.days} days and ${backup.documents} documents with their files."
+                        else "It holds ${backup.days} days but no evidence files, so your evidence stays as it is.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
                     listOf(
                         false to ("Merge" to "Add what's missing and keep everything you have"),
-                        true to ("Replace" to "Swap all days, plans, rules and settings for the backup's"),
+                        true to (
+                            "Replace" to if (backup.hasEvidence) "Swap all days, plans, rules, settings and evidence for the backup's. Undo can't bring back the evidence it replaces"
+                            else "Swap all days, plans, rules and settings for the backup's"
+                            ),
                     ).forEach { (value, texts) ->
                         Row(
                             Modifier.fillMaxWidth().selectable(selected = replace == value, role = Role.RadioButton) { replace = value }.padding(vertical = 8.dp),
@@ -403,7 +412,7 @@ private fun DataPage(settings: Settings, extras: SettingsExtras, vm: SettingsCom
             confirmButton = {
                 TextButton(onClick = {
                     pendingRestore = null
-                    vm.restore(json, replace)
+                    vm.restore(backup, replace)
                 }) { Text("Restore") }
             },
             dismissButton = { TextButton(onClick = { pendingRestore = null }) { Text("Cancel") } },
