@@ -20,14 +20,16 @@ HAND_BACK := $(if $(findstring podman,$(shell docker --version 2>/dev/null)),tru
 # option is ignored where SELinux is off.
 
 # Everything builds inside the container, so the host needs no JDK or Android SDK.
+# Robolectric keeps its Android runtimes in root's ~/.m2, mounted so they download only once.
 # Gradle runs as root to write the mounted caches, then hands back what it touched.
 define gradle
-	mkdir -p $(GRADLE_BUILD_HOME) $(ANDROID_SDK_HOME)
+	mkdir -p $(GRADLE_BUILD_HOME) $(ANDROID_SDK_HOME)/m2
 	docker run --rm \
 		-u 0:0 \
 		-v $(CURDIR):/project:z \
 		-v $(GRADLE_BUILD_HOME):/home/gradle/.gradle:z \
 		-v $(ANDROID_SDK_HOME):/home/gradle/.android:z \
+		-v $(ANDROID_SDK_HOME)/m2:/root/.m2:z \
 		-e GRADLE_USER_HOME=/home/gradle/.gradle \
 		-w /project $(DOCKER_IMAGE) \
 		sh -c "./gradlew --no-daemon -PversionCode=$(VERSION_CODE) -PversionName=$(VERSION_NAME) $(1); status=\$$?; $(HAND_BACK) /project/app /project/build /project/.gradle-build-cache /project/.android-cache 2>/dev/null; exit \$$status"
